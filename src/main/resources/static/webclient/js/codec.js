@@ -166,12 +166,16 @@ export const NetGameItem = {
 
 export const NetObjectMovement = {
     read(r) {
-        return { entityId: r.readLong(), entityType: r.readByte(),
-                 posX: r.readFloat(), posY: r.readFloat(), velX: r.readFloat(), velY: r.readFloat() };
+        const entityId = r.readLong(), entityType = r.readByte();
+        const posX = r.readFloat(), posY = r.readFloat();
+        const velX = r.readFloat(), velY = r.readFloat();
+        const flags = r.readByte();
+        return { entityId, entityType, posX, posY, velX, velY, flags, attacking: !!(flags & 0x01) };
     },
     write(w, m) {
         w.writeLong(m.entityId); w.writeByte(m.entityType);
         w.writeFloat(m.posX); w.writeFloat(m.posY); w.writeFloat(m.velX); w.writeFloat(m.velY);
+        w.writeByte(m.flags || 0);
     }
 };
 

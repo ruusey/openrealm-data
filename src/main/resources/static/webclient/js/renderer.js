@@ -530,20 +530,25 @@ export class GameRenderer {
             const isVertical = Math.abs(player.dy || 0) > Math.abs(player.dx || 0);
             const isBack = isVertical && (player.dy || 0) < 0;
             let animName;
-            // Attack animation takes priority (local player only — we know aim direction)
+            // Attack animation: local player uses aim direction, other players
+            // use their movement direction to pick attack_side/down/up.
+            const remoteAttacking = !isLocal && player.attacking && player.attackUntil > performance.now();
             if (isLocal && gameState.shootingAnim) {
                 animName = gameState.shootingAnim;
+            } else if (remoteAttacking) {
+                // Other player is firing — pick attack anim from their velocity direction
+                animName = isVertical ? (isBack ? 'attack_up' : 'attack_down') : 'attack_side';
             } else if (isMoving) {
                 animName = isVertical ? (isBack ? 'walk_back' : 'walk_front') : 'walk_side';
             } else {
                 animName = isVertical ? (isBack ? 'idle_back' : 'idle_front') : 'idle_side';
             }
-            const isAttacking = isLocal && gameState.shootingAnim;
+            const isAttacking = (isLocal && gameState.shootingAnim) || remoteAttacking;
             const anim = animDef.animations[animName] || animDef.animations['idle_side'];
             const frames = anim.frames;
             let fIdx;
             if (isAttacking) {
-                fIdx = gameState.attackFrame % frames.length;
+                fIdx = (isLocal ? gameState.attackFrame : (player.animFrame || 0)) % frames.length;
             } else if (isMoving) {
                 fIdx = player.animFrame % frames.length;
             } else {
@@ -642,6 +647,7 @@ export class GameRenderer {
         this.entityLayer.addChild(bars);
 
         // Player name above bars (other players only — local player name goes in sidebar)
+        let iconAnchorY = barY - 2;
         if (!isLocal) {
             const name = player.name || CLASS_NAMES[classId] || 'Player';
             const nameColor = GameRenderer.getNameColorHex(player.chatRole);
@@ -654,7 +660,12 @@ export class GameRenderer {
             nameText.x = sx + size / 2;
             nameText.y = barY - 2;
             this.entityLayer.addChild(nameText);
+            iconAnchorY = barY - 18;
         }
+
+        // Status effect icons above health bars / name
+        const playerEffects = isLocal ? gameState.effectIds : (player.effectIds || []);
+        this._drawStatusIcons(playerEffects, sx + size / 2, iconAnchorY);
     }
 
     renderEnemy(enemy, offsetX, offsetY, gameState) {
@@ -710,6 +721,7 @@ export class GameRenderer {
         }
 
         // Enemy name
+        let enemyIconAnchorY = sy - 2;
         if (enemyDef) {
             const nameText = new PIXI.Text(enemyDef.name || `Enemy`, {
                 fontSize: 16, fill: 0xff8080,
@@ -720,6 +732,12 @@ export class GameRenderer {
             nameText.x = sx + size / 2;
             nameText.y = sy - 2;
             this.entityLayer.addChild(nameText);
+            enemyIconAnchorY = sy - 18;
+        }
+
+        // Status effect icons above enemy name
+        if (enemy.effectIds) {
+            this._drawStatusIcons(enemy.effectIds, sx + size / 2, enemyIconAnchorY);
         }
     }
 
@@ -1184,6 +1202,72 @@ export class GameRenderer {
             txt.alpha = alpha;
             txt.scale.set(scale);
             this.uiLayer.addChild(txt);
+        }
+    }
+
+    // Status effect icon definitions: [effectId, symbol, color]
+    static STATUS_ICON_DEFS = [
+        [StatusEffect.HEALING,      '+', 0xFF4444],   // red medical cross
+        [StatusEffect.BERSERK,      'X', 0xFF6644],   // crossed swords / berserk
+        [StatusEffect.SPEEDY,       '>', 0x44FF44],   // green arrow / speed boost
+        [StatusEffect.INVINCIBLE,   'O', 0x44AAFF],   // blue shield / invulnerable
+        [StatusEffect.ARMORED,      'A', 0x6688CC],   // blue-grey armor
+        [StatusEffect.DAMAGING,     '!', 0xFFAA44],   // orange damage boost
+        [StatusEffect.PARALYZED,    '=', 0x888888],   // grey paralysis
+        [StatusEffect.STUNNED,      '*', 0x88CCFF],   // blue stun stars
+        [StatusEffect.SLOWED,       'v', 0x6688FF],   // blue slow arrow
+        [StatusEffect.POISONED,     '~', 0x40CC40],   // green poison
+        [StatusEffect.CURSED,       'C', 0xAA2255],   // purple curse
+        [StatusEffect.DAZED,        '?', 0x9988AA],   // purple daze
+        [StatusEffect.STASIS,       '#', 0x444448],   // dark stasis
+        [StatusEffect.ARMOR_BROKEN, 'V', 0x7060CC],   // purple broken armor
+        [StatusEffect.INVISIBLE,    'I', 0xCCBB88],   // tan invisibility
+    ];
+
+    /**
+     * Draw status effect icons above an entity at the given position.
+     * Icons are small colored squares with a letter symbol, arranged in a row.
+     * @param {number[]} effectIds - array of active effect IDs
+     * @param {number} centerX - center X position (screen coords)
+     * @param {number} topY - Y position above which icons are drawn
+     */
+    _drawStatusIcons(effectIds, centerX, topY) {
+        if (!effectIds || !effectIds.length) return;
+        const active = [];
+        for (const [eid, sym, color] of GameRenderer.STATUS_ICON_DEFS) {
+            if (this._hasEffect(effectIds, eid)) active.push({ sym, color });
+        }
+        if (active.length === 0) return;
+
+        const iconSize = 12;
+        const iconGap = 2;
+        const totalWidth = active.length * iconSize + (active.length - 1) * iconGap;
+        let startX = centerX - totalWidth / 2;
+        const y = topY - iconSize - 2;
+
+        for (const { sym, color } of active) {
+            // Background square
+            const bg = new PIXI.Graphics();
+            bg.beginFill(0x000000, 0.6);
+            bg.drawRoundedRect(startX, y, iconSize, iconSize, 2);
+            bg.endFill();
+            bg.beginFill(color, 0.9);
+            bg.drawRoundedRect(startX + 1, y + 1, iconSize - 2, iconSize - 2, 1);
+            bg.endFill();
+            this.entityLayer.addChild(bg);
+
+            // Symbol text
+            const txt = new PIXI.Text(sym, {
+                fontSize: 9, fill: 0xFFFFFF,
+                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
+                stroke: 0x000000, strokeThickness: 1
+            });
+            txt.anchor.set(0.5, 0.5);
+            txt.x = startX + iconSize / 2;
+            txt.y = y + iconSize / 2;
+            this.entityLayer.addChild(txt);
+
+            startX += iconSize + iconGap;
         }
     }
 

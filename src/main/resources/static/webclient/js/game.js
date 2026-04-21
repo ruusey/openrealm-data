@@ -620,6 +620,11 @@ export class GameState {
                     }
                     if (id !== this.playerId) {
                         p.dx = mov.velX; p.dy = mov.velY;
+                        // Apply attack animation state from server
+                        if (mov.attacking) {
+                            p.attacking = true;
+                            p.attackUntil = performance.now() + 350;
+                        }
                     }
                 }
             } else if (t === 1) {
