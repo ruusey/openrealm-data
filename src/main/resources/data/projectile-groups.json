@@ -363,7 +363,7 @@
 				"angle": 0,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": []
 			},
 			{
@@ -373,7 +373,7 @@
 				"angle": -0.1,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": []
 			},
 			{
@@ -383,7 +383,7 @@
 				"angle": -0.2,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": []
 			},
 			{
@@ -393,7 +393,7 @@
 				"angle": 0.2,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": []
 			},
 			{
@@ -403,7 +403,7 @@
 				"angle": 0.1,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": []
 			}
 		]
@@ -1248,7 +1248,7 @@
 				"angle": "{{PI/4}}",
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1258,7 +1258,7 @@
 				"angle": 0.25,
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1268,7 +1268,7 @@
 				"angle": "{{3PI/4}}",
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1278,7 +1278,7 @@
 				"angle": 0.25,
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1288,7 +1288,7 @@
 				"angle": "{{5PI/4}}",
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1298,7 +1298,7 @@
 				"angle": 0.25,
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1308,7 +1308,7 @@
 				"angle": "{{7PI/4}}",
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1318,7 +1318,7 @@
 				"angle": 0.25,
 				"range": 450,
 				"size": 32,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			}
 		]
@@ -1705,7 +1705,7 @@
 				"angle": 0,
 				"range": 220,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -1715,7 +1715,7 @@
 				"angle": 0.25,
 				"range": 220,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			}
 		]
@@ -2275,7 +2275,7 @@
 				"angle": 0,
 				"range": 225,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"flags": []
 			},
 			{
@@ -2285,7 +2285,7 @@
 				"angle": 0.25,
 				"range": 225,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"flags": []
 			},
 			{
@@ -2295,7 +2295,7 @@
 				"angle": 0.1963,
 				"range": 225,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"flags": []
 			},
 			{
@@ -2305,7 +2305,7 @@
 				"angle": 0.44630000000000003,
 				"range": 225,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"flags": []
 			},
 			{
@@ -2315,7 +2315,7 @@
 				"angle": -0.1963,
 				"range": 225,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"flags": []
 			},
 			{
@@ -2325,7 +2325,7 @@
 				"angle": 0.0537,
 				"range": 225,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"flags": []
 			}
 		]
@@ -2695,7 +2695,7 @@
 				"angle": "0",
 				"range": 150,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"damage": 25,
 				"amplitude": 0,
 				"frequency": 0,
@@ -4004,7 +4004,7 @@
 				"angle": -0.2,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4014,7 +4014,7 @@
 				"angle": -0.1,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4024,7 +4024,7 @@
 				"angle": 0.1,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4034,7 +4034,7 @@
 				"angle": 0.2,
 				"range": 300,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			}
 		]
@@ -4052,7 +4052,7 @@
 				"angle": -0.3,
 				"range": 250,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"effects": [
 					{
@@ -4068,7 +4068,7 @@
 				"angle": -0.15,
 				"range": 250,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"effects": [
 					{
@@ -4084,7 +4084,7 @@
 				"angle": 0,
 				"range": 250,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"effects": [
 					{
@@ -4100,7 +4100,7 @@
 				"angle": 0.15,
 				"range": 250,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"effects": [
 					{
@@ -4116,7 +4116,7 @@
 				"angle": 0.3,
 				"range": 250,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"effects": [
 					{
@@ -4508,7 +4508,7 @@
 				"angle": -0.2,
 				"range": 350,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": [],
 				"effects": [
 					{
@@ -4524,7 +4524,7 @@
 				"angle": -0.1,
 				"range": 350,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": [],
 				"effects": [
 					{
@@ -4540,7 +4540,7 @@
 				"angle": 0.1,
 				"range": 350,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": [],
 				"effects": [
 					{
@@ -4556,7 +4556,7 @@
 				"angle": 0.2,
 				"range": 350,
 				"size": 24,
-				"magnitude": 5.5,
+				"magnitude": 3.69,
 				"flags": [],
 				"effects": [
 					{
@@ -4956,7 +4956,7 @@
 				"angle": -0.25,
 				"range": 150,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4966,7 +4966,7 @@
 				"angle": -0.125,
 				"range": 150,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4976,7 +4976,7 @@
 				"angle": 0,
 				"range": 150,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4986,7 +4986,7 @@
 				"angle": 0.125,
 				"range": 150,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			},
 			{
@@ -4996,7 +4996,7 @@
 				"angle": 0.25,
 				"range": 150,
 				"size": 24,
-				"magnitude": 5,
+				"magnitude": 3.35,
 				"flags": []
 			}
 		],
@@ -5053,7 +5053,7 @@
 				"angle": 0,
 				"range": 350,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"amplitude": 6,
 				"frequency": 35
@@ -5065,7 +5065,7 @@
 				"angle": 0,
 				"range": 350,
 				"size": 24,
-				"magnitude": 4.5,
+				"magnitude": 3.02,
 				"flags": [],
 				"amplitude": -6,
 				"frequency": 35
@@ -5961,7 +5961,7 @@
 				"angle": "0",
 				"range": 280,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"amplitude": 6,
 				"frequency": 18,
 				"flags": [
@@ -5975,7 +5975,7 @@
 				"angle": "0",
 				"range": 280,
 				"size": 24,
-				"magnitude": 6,
+				"magnitude": 4.02,
 				"amplitude": -6,
 				"frequency": 18,
 				"flags": [
@@ -5998,7 +5998,7 @@
 				"angle": "-0.15",
 				"range": 180,
 				"size": 32,
-				"magnitude": 7,
+				"magnitude": 4.69,
 				"flags": [],
 				"effects": [
 					{
@@ -6014,7 +6014,7 @@
 				"angle": "0.15",
 				"range": 180,
 				"size": 32,
-				"magnitude": 7,
+				"magnitude": 4.69,
 				"flags": [],
 				"effects": [
 					{
