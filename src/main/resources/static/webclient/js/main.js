@@ -525,6 +525,8 @@ document.getElementById('tab-graveyard').addEventListener('click', () => {
 async function loadLeaderboard() {
     const listEl = document.getElementById('leaderboard-list');
     listEl.innerHTML = '<p style="color:#887868">Loading...</p>';
+    // Ensure item definitions are available for equipment tooltips
+    await ensureItemDefs();
     try {
         const entries = await api.request('GET', '/data/stats/top?count=25');
         if (!entries || entries.length === 0) {
@@ -587,7 +589,7 @@ function showEquipmentTooltip(event, entry) {
     for (let i = 0; i < 4; i++) {
         const equip = entry.equipment.find(e => e.slotIdx === i);
         if (equip && equip.itemId >= 0) {
-            const itemDef = game.itemData?.[equip.itemId];
+            const itemDef = game.itemData?.[equip.itemId] || _graveyardItemDefs?.[equip.itemId];
             const name = itemDef?.name || `Item ${equip.itemId}`;
             const spriteUrl = getItemSpriteUrl({ itemId: equip.itemId });
             const imgTag = spriteUrl
@@ -1947,21 +1949,66 @@ let lastInvKey = '';
 let isMouseOverHud = false; // Prevents shooting/ability when hovering over UI
 let dragSlot = -1; // Slot being dragged (-1 = none)
 let dragEl = null; // Floating drag element
+let _dragOverBag = 0; // Target bag number hovered during drag (0 = none)
 let lastLootKey = '';
 let lastTouchTime = 0; // Tracks recent touch events to filter synthetic mouse events
 // Sprite data URL cache to avoid re-extracting every frame
 const spriteCache = {};
+// Preloaded sprite sheet images for canvas-based extraction (works without renderer)
+const _spriteSheetImages = {};
+
+/** Load a sprite sheet image if not already cached. Returns the Image or null. */
+function _ensureSpriteSheet(spriteKey) {
+    const key = spriteKey.replace('.png', '');
+    if (_spriteSheetImages[key]) return _spriteSheetImages[key];
+    // Start async load — returns null this call, cached next time
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = api.getSpriteUrl(spriteKey);
+    img.onload = () => { _spriteSheetImages[key] = img; };
+    _spriteSheetImages[key] = null; // Mark as loading (prevents re-requesting)
+    return null;
+}
+
+/**
+ * Extract a sprite from a sheet image using a plain canvas (no PIXI required).
+ * Returns a data URL or null if the sheet isn't loaded yet.
+ */
+function _extractSprite(spriteKey, col, row, spriteSize, spriteHeight) {
+    const key = spriteKey.replace('.png', '');
+    const img = _spriteSheetImages[key];
+    if (!img) return null;
+    const sw = spriteSize || 8;
+    const sh = spriteHeight || sw;
+    const canvas = document.createElement('canvas');
+    canvas.width = sw; canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, col * sw, row * sh, sw, sh, 0, 0, sw, sh);
+    return canvas.toDataURL();
+}
 
 function getItemSpriteUrl(item) {
-    if (!item || item.itemId < 0 || !renderer) return null;
+    if (!item || item.itemId < 0) return null;
     const cacheKey = item.itemId;
     if (spriteCache[cacheKey]) return spriteCache[cacheKey];
-    const itemDef = game.itemData[item.itemId] || item;
-    if (itemDef.spriteKey) {
-        const url = renderer.getSpriteDataUrl(itemDef.spriteKey, itemDef.col || 0,
+
+    // Try game.itemData first, fall back to preloaded defs for char select screen
+    const itemDef = game.itemData[item.itemId] || _graveyardItemDefs?.[item.itemId] || item;
+    if (!itemDef.spriteKey) return null;
+
+    // Prefer renderer if available (in-game), otherwise use canvas extraction
+    let url = null;
+    if (renderer) {
+        url = renderer.getSpriteDataUrl(itemDef.spriteKey, itemDef.col || 0,
             itemDef.row || 0, itemDef.spriteSize || 8, itemDef.spriteHeight || 0);
-        if (url) { spriteCache[cacheKey] = url; return url; }
     }
+    if (!url) {
+        _ensureSpriteSheet(itemDef.spriteKey);
+        url = _extractSprite(itemDef.spriteKey, itemDef.col || 0,
+            itemDef.row || 0, itemDef.spriteSize || 8, itemDef.spriteHeight || 0);
+    }
+    if (url) { spriteCache[cacheKey] = url; return url; }
     return null;
 }
 
@@ -2317,15 +2364,19 @@ function moveDrag(e) {
     if (!dragEl) return;
     dragEl.style.left = (e.clientX - 20) + 'px';
     dragEl.style.top = (e.clientY - 20) + 'px';
-    // Highlight bag tab when dragging over it for cross-bag transfer hint
-    const hoverTarget = document.elementFromPoint(e.clientX, e.clientY);
+    // Track which bag tab the cursor is hovering over during drag
+    _dragOverBag = 0;
     document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('drag-hover'));
-    if (hoverTarget && dragSlot >= 4 && dragSlot <= 19) {
-        const tabEl = hoverTarget.closest('.inv-tab');
+    if (dragSlot >= 4 && dragSlot <= 19) {
+        const hoverTarget = document.elementFromPoint(e.clientX, e.clientY);
+        const tabEl = hoverTarget ? hoverTarget.closest('.inv-tab') : null;
         if (tabEl) {
             const targetBag = parseInt(tabEl.dataset.bag);
             const fromBag = dragSlot < 12 ? 1 : 2;
-            if (targetBag && targetBag !== fromBag) tabEl.classList.add('drag-hover');
+            if (targetBag && targetBag !== fromBag) {
+                _dragOverBag = targetBag;
+                tabEl.classList.add('drag-hover');
+            }
         }
     }
 }
@@ -2347,29 +2398,20 @@ function endDrag(e) {
             network.sendMoveItem(game.playerId, targetIdx, dragSlot, false, false);
         }
         lastInvKey = ''; lastLootKey = '';
-    } else {
-        // Check if dropped on the OTHER bag tab — move item to first empty
-        // slot in that bag for quick cross-bag transfers.
-        const tabEl = dropTarget ? dropTarget.closest('.inv-tab') : null;
-        if (tabEl && dragSlot >= 4 && dragSlot <= 19) {
-            const targetBag = parseInt(tabEl.dataset.bag);
-            const fromBag = dragSlot < 12 ? 1 : 2;
-            if (targetBag && targetBag !== fromBag) {
-                const bagStart = targetBag === 1 ? 4 : 12;
-                const bagEnd = bagStart + 8;
-                // Find first empty slot in the target bag
-                let emptySlot = -1;
-                for (let i = bagStart; i < bagEnd; i++) {
-                    if (!game.inventory[i] || game.inventory[i].itemId < 0) {
-                        emptySlot = i;
-                        break;
-                    }
-                }
-                if (emptySlot >= 0) {
-                    network.sendMoveItem(game.playerId, emptySlot, dragSlot, false, false);
-                    lastInvKey = ''; lastLootKey = '';
-                }
+    } else if (_dragOverBag > 0 && dragSlot >= 4 && dragSlot <= 19) {
+        // Dropped while hovering over another bag tab — move to first empty slot
+        const bagStart = _dragOverBag === 1 ? 4 : 12;
+        const bagEnd = bagStart + 8;
+        let emptySlot = -1;
+        for (let i = bagStart; i < bagEnd; i++) {
+            if (!game.inventory[i] || game.inventory[i].itemId < 0) {
+                emptySlot = i;
+                break;
             }
+        }
+        if (emptySlot >= 0) {
+            network.sendMoveItem(game.playerId, emptySlot, dragSlot, false, false);
+            lastInvKey = ''; lastLootKey = '';
         }
     }
 
@@ -2378,6 +2420,7 @@ function endDrag(e) {
 
 function cleanupDrag() {
     dragSlot = -1;
+    _dragOverBag = 0;
     if (dragEl) { dragEl.remove(); dragEl = null; }
     document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('drag-hover'));
 }
