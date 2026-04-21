@@ -39,6 +39,7 @@ function addSpriteWithOutline(container, tex, x, y, w, h, opts) {
         if (opts?.anchor) ol.anchor.copyFrom(opts.anchor);
         if (opts?.flipX) { ol.anchor.set(1, ol.anchor.y); ol.scale.x = -Math.abs(ol.scale.x); }
         if (opts?.rotation != null) ol.rotation = opts.rotation;
+        if (opts?.mask) ol.mask = opts.mask; // Share mask for wading clip
         container.addChild(ol);
     }
 }
@@ -566,6 +567,12 @@ export class GameRenderer {
             row = localRow;
         }
 
+        // Check if player is wading through a slowing tile (water/lava)
+        const wading = this._isEntityOnSlowTile(player, gameState);
+        // When wading, clip bottom 30% of sprite to simulate legs submerged
+        const wadingClip = wading ? 0.30 : 0;
+        const visibleHeight = size * (1 - wadingClip);
+
         // Circular ground shadow under player
         const pShadow = new PIXI.Graphics();
         pShadow.beginFill(0x000000, 0.3);
@@ -601,8 +608,24 @@ export class GameRenderer {
             else if (this._hasEffect(effects, StatusEffect.CURSED))     spr.tint = 0x992255;
             else if (this._hasEffect(effects, StatusEffect.POISONED))   spr.tint = 0x40CC40;
 
-            addSpriteWithOutline(this.entityLayer, tex, sx, sy, size, size,
-                flipX ? { flipX: true } : null);
+            // Wading effect: shift sprite down so the character sinks into the
+            // liquid, then mask off the bottom so it looks submerged.
+            if (wading) {
+                const sinkOffset = size * wadingClip; // how far down the sprite shifts
+                spr.y = sy + sinkOffset;
+                // Mask stays at the original ground level — clips the shifted sprite
+                const mask = new PIXI.Graphics();
+                mask.beginFill(0xFFFFFF);
+                mask.drawRect(sx - 2, sy, size + 4, size);
+                mask.endFill();
+                this.entityLayer.addChild(mask);
+                spr.mask = mask;
+                addSpriteWithOutline(this.entityLayer, tex, sx, spr.y, size, size,
+                    flipX ? { flipX: true, mask } : { mask });
+            } else {
+                addSpriteWithOutline(this.entityLayer, tex, sx, sy, size, size,
+                    flipX ? { flipX: true } : null);
+            }
             this.entityLayer.addChild(spr);
         } else {
             // Fallback: colored square
@@ -1269,6 +1292,23 @@ export class GameRenderer {
 
             startX += iconSize + iconGap;
         }
+    }
+
+    /**
+     * Check if an entity's center is on a slowing tile (water, lava, etc).
+     * Used for the wading visual effect.
+     */
+    _isEntityOnSlowTile(entity, gameState) {
+        if (!gameState.mapTiles || !gameState.tileData) return false;
+        const ts = gameState.tileSize || 32;
+        const entSize = entity.size || PLAYER_SIZE;
+        const cx = Math.floor((entity.pos.x + entSize / 2) / ts);
+        const cy = Math.floor((entity.pos.y + entSize / 2) / ts);
+        if (cx < 0 || cx >= (gameState.mapWidth || 0) || cy < 0 || cy >= (gameState.mapHeight || 0)) return false;
+        const tile = gameState.mapTiles[cy]?.[cx];
+        if (!tile || tile.base <= 0) return false;
+        const tileDef = gameState.tileData[tile.base];
+        return !!(tileDef?.data?.slows);
     }
 
     // Check if an effect ID is present in an entity's effect array

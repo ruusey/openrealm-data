@@ -3644,119 +3644,77 @@ function markDirty(which) {
   saveStatus.style.color = '#fa0';
 }
 
+function _isLocalhost() {
+  const h = location.hostname;
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
+
+function _downloadJson(filename, data, indent) {
+  const blob = new Blob([JSON.stringify(data, null, indent || '\t')], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
 async function saveAll() {
+  const isLocal = _isLocalhost();
   saveBtn.disabled = true;
-  saveStatus.textContent = 'Saving...';
+  saveStatus.textContent = isLocal ? 'Saving...' : 'Downloading...';
   saveStatus.style.color = '#ff0';
+
+  // Map of dirty flag -> { endpoint, filename, data, indent, dirtyRef }
+  const sections = [
+    { dirty: () => dirtyTiles,       clear: () => { dirtyTiles = false; },       endpoint: '/gamedata/tiles',       filename: 'tiles.json',        data: tiles,       indent: 4,     label: 'tiles' },
+    { dirty: () => dirtyTerrains,    clear: () => { dirtyTerrains = false; },    endpoint: '/gamedata/terrains',    filename: 'terrains.json',     data: terrains,    indent: '\t',  label: 'terrains' },
+    { dirty: () => dirtyItems,       clear: () => { dirtyItems = false; },       endpoint: '/gamedata/items',       filename: 'game-items.json',   data: items,       indent: '\t',  label: 'items' },
+    { dirty: () => dirtyProjGroups,  clear: () => { dirtyProjGroups = false; },  endpoint: '/gamedata/projectiles', filename: 'projectile-groups.json', data: projGroups, indent: '\t', label: 'projectiles' },
+    { dirty: () => dirtyMaps,        clear: () => { dirtyMaps = false; },        endpoint: '/gamedata/maps',        filename: 'maps.json',         data: maps,        indent: '\t',  label: 'maps' },
+    { dirty: () => dirtyEnemies,     clear: () => { dirtyEnemies = false; },     endpoint: '/gamedata/enemies',     filename: 'enemies.json',      data: enemies,     indent: '\t',  label: 'enemies' },
+    { dirty: () => dirtyLootGroups,  clear: () => { dirtyLootGroups = false; },  endpoint: '/gamedata/lootgroups',  filename: 'loot-groups.json',  data: lootGroups,  indent: '\t',  label: 'loot groups' },
+    { dirty: () => dirtyLootTables,  clear: () => { dirtyLootTables = false; },  endpoint: '/gamedata/loottables',  filename: 'loot-tables.json',  data: lootTables,  indent: '\t',  label: 'loot tables' },
+    { dirty: () => dirtyAnimations,  clear: () => { dirtyAnimations = false; },  endpoint: '/gamedata/animations',  filename: 'animations.json',   data: animations,  indent: '\t',  label: 'animations' },
+    { dirty: () => dirtyPortals,     clear: () => { dirtyPortals = false; },     endpoint: '/gamedata/portals',     filename: 'portals.json',      data: portals,     indent: '\t',  label: 'portals' },
+    { dirty: () => dirtySetPieces,   clear: () => { dirtySetPieces = false; },   endpoint: '/gamedata/setpieces',   filename: 'setpieces.json',    data: setpieces,   indent: '\t',  label: 'set pieces' },
+    { dirty: () => dirtyRealmEvents, clear: () => { dirtyRealmEvents = false; }, endpoint: '/gamedata/realm-events', filename: 'realm-events.json', data: realmEvents, indent: '\t',  label: 'realm events' },
+  ];
+
   try {
     const results = [];
-    if (dirtyTiles) {
-      const res = await fetch('/gamedata/tiles', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(tiles, null, 4) });
-      if (!res.ok) throw new Error('tiles: ' + res.statusText);
-      dirtyTiles = false;
-      results.push('tiles');
+    for (const sec of sections) {
+      if (!sec.dirty()) continue;
+      if (isLocal) {
+        // Local dev: save to filesystem via server endpoint
+        const res = await fetch(sec.endpoint, {
+          method: 'PUT',
+          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify(sec.data, null, sec.indent)
+        });
+        if (!res.ok) throw new Error(sec.label + ': ' + res.statusText);
+      } else {
+        // Production: download file to user's machine
+        _downloadJson(sec.filename, sec.data, sec.indent);
+      }
+      sec.clear();
+      results.push(sec.label);
     }
-    if (dirtyTerrains) {
-      const res = await fetch('/gamedata/terrains', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(terrains, null, '\t') });
-      if (!res.ok) throw new Error('terrains: ' + res.statusText);
-      dirtyTerrains = false;
-      results.push('terrains');
+    if (results.length === 0) {
+      saveStatus.textContent = 'Nothing to save';
+      saveStatus.style.color = '#aaa';
+    } else {
+      saveStatus.textContent = isLocal
+        ? `Saved ${results.join(', ')}!`
+        : `Downloaded ${results.join(', ')}!`;
+      saveStatus.style.color = '#8f8';
     }
-    if (dirtyItems) {
-      const res = await fetch('/gamedata/items', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(items, null, '\t') });
-      if (!res.ok) throw new Error('items: ' + res.statusText);
-      dirtyItems = false;
-      results.push('items');
-    }
-    if (dirtyProjGroups) {
-      const res = await fetch('/gamedata/projectiles', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(projGroups, null, '\t') });
-      if (!res.ok) throw new Error('projectiles: ' + res.statusText);
-      dirtyProjGroups = false;
-      results.push('projectiles');
-    }
-    if (dirtyMaps) {
-      const res = await fetch('/gamedata/maps', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(maps, null, '\t') });
-      if (!res.ok) throw new Error('maps: ' + res.statusText);
-      dirtyMaps = false;
-      results.push('maps');
-    }
-    if (dirtyEnemies) {
-      const res = await fetch('/gamedata/enemies', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(enemies, null, '\t')
-      });
-      if (!res.ok) throw new Error('enemies: ' + res.statusText);
-      dirtyEnemies = false;
-      results.push('enemies');
-    }
-    if (dirtyLootGroups) {
-      const res = await fetch('/gamedata/lootgroups', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(lootGroups, null, '\t')
-      });
-      if (!res.ok) throw new Error('loot groups: ' + res.statusText);
-      dirtyLootGroups = false;
-      results.push('loot groups');
-    }
-    if (dirtyLootTables) {
-      const res = await fetch('/gamedata/loottables', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(lootTables, null, '\t')
-      });
-      if (!res.ok) throw new Error('loot tables: ' + res.statusText);
-      dirtyLootTables = false;
-      results.push('loot tables');
-    }
-    if (dirtyAnimations) {
-      const res = await fetch('/gamedata/animations', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(animations, null, '\t')
-      });
-      if (!res.ok) throw new Error('animations: ' + res.statusText);
-      dirtyAnimations = false;
-      results.push('animations');
-    }
-    if (dirtyPortals) {
-      const res = await fetch('/gamedata/portals', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(portals, null, '\t')
-      });
-      if (!res.ok) throw new Error('portals: ' + res.statusText);
-      dirtyPortals = false;
-      results.push('portals');
-    }
-    if (dirtySetPieces) {
-      const res = await fetch('/gamedata/setpieces', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(setpieces, null, '\t')
-      });
-      if (!res.ok) throw new Error('set pieces: ' + res.statusText);
-      dirtySetPieces = false;
-      results.push('set pieces');
-    }
-    if (dirtyRealmEvents) {
-      const res = await fetch('/gamedata/realm-events', {
-        method: 'PUT',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(realmEvents, null, '\t')
-      });
-      if (!res.ok) throw new Error('realm events: ' + res.statusText);
-      dirtyRealmEvents = false;
-      results.push('realm events');
-    }
-    saveStatus.textContent = `Saved ${results.join(', ')}!`;
-    saveStatus.style.color = '#8f8';
   } catch (e) {
     saveStatus.textContent = 'Error: ' + e.message;
     saveStatus.style.color = '#f88';
-    saveBtn.disabled = false;
   }
+  saveBtn.disabled = false;
 }
 
 // ========== EVENTS ==========
@@ -3858,6 +3816,10 @@ function bindEvents() {
   document.getElementById('terrainSearch').addEventListener('input', (e) => renderTerrainList(e.target.value));
 
   saveBtn.addEventListener('click', saveAll);
+  // Show download vs save label based on environment
+  if (!_isLocalhost()) {
+    saveBtn.textContent = 'Download All';
+  }
   addTileBtn.addEventListener('click', addTile);
   deleteTileBtn.addEventListener('click', deleteTile);
   applyBtn.addEventListener('click', applyDetail);

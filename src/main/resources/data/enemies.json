@@ -3561,7 +3561,10 @@
 			"vit": 0,
 			"wis": 0
 		},
-		"phases": []
+		"phases": [],
+		"permanentEffects": [
+			6
+		]
 	},
 	{
 		"enemyId": 68,

@@ -1432,9 +1432,17 @@ const perfMetrics = {
 };
 
 // --- Game Loop ---
+// Cap rendering at 60fps to avoid wasting GPU cycles on a pixel art game.
+// Simulation still runs at fixed 64Hz regardless of render rate.
+const TARGET_FPS = 60;
+const FRAME_MIN_MS = 1000 / TARGET_FPS;
 let lastTime = 0;
+let _lastRenderTime = 0;
 function gameLoop(timestamp) {
     if (lastTime === 0) lastTime = timestamp; // prevent massive first-frame dt
+
+    // Always run simulation ticks (processInput) so game logic stays at 64Hz,
+    // but skip rendering if we haven't hit the target frame interval yet.
     const dt = Math.min((timestamp - lastTime) / 1000, 0.05); // Cap delta at 50ms
     lastTime = timestamp;
     perfMetrics.update(timestamp);
@@ -1443,23 +1451,28 @@ function gameLoop(timestamp) {
     game._lastPingMs = perfMetrics.ping * 2;
 
     if (currentScreen === 'game' && game.playerId !== null) {
-        // Process input
+        // Process input (simulation ticks always run)
         processInput(dt);
 
-        // Update interpolation
-        game.updateInterpolation(dt);
+        // Only render at target FPS to save GPU/CPU
+        if (timestamp - _lastRenderTime >= FRAME_MIN_MS) {
+            _lastRenderTime = timestamp;
 
-        // Render
-        if (renderer) {
-            renderer.render(game);
+            // Update interpolation
+            game.updateInterpolation(dt);
+
+            // Render
+            if (renderer) {
+                renderer.render(game);
+            }
+
+            // Update minimap
+            if (minimap) minimap.render(game);
+
+            // Update HUD + perf overlay
+            updateHUD();
+            updatePerfOverlay();
         }
-
-        // Update minimap
-        if (minimap) minimap.render(game);
-
-        // Update HUD + perf overlay
-        updateHUD();
-        updatePerfOverlay();
     }
 
     requestAnimationFrame(gameLoop);
