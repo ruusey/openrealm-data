@@ -78,6 +78,13 @@ export class GameRenderer {
         this.healthBarGraphics = null;
         this.tileGraphics = null;
 
+        // Tile layer cache key — invalidated when visible tile range changes
+        this._tileCacheKey = null;
+    }
+
+    /** Force tile layer rebuild on next frame (call on realm transition). */
+    invalidateTileCache() {
+        this._tileCacheKey = null;
     }
 
     async init() {
@@ -215,17 +222,11 @@ export class GameRenderer {
     }
 
     renderTiles(gameState, offsetX, offsetY, screenW, screenH) {
-        // Destroy all children to free GPU memory (prevents massive leak)
-        for (let i = this.tileLayer.children.length - 1; i >= 0; i--) {
-            this.tileLayer.children[i].destroy();
-        }
-        this.tileLayer.removeChildren();
         if (!gameState.mapTiles) return;
-
         const localPlayer = gameState.getLocalPlayer();
         if (!localPlayer) return;
 
-        const ts = this.tileSize; // Actual tile size from map data (e.g., 32)
+        const ts = this.tileSize;
         const playerTileX = Math.floor(localPlayer.pos.x / ts);
         const playerTileY = Math.floor(localPlayer.pos.y / ts);
 
@@ -234,19 +235,38 @@ export class GameRenderer {
         const minC = Math.max(0, playerTileX - VIEWPORT_TILES);
         const maxC = Math.min(gameState.mapWidth - 1, playerTileX + VIEWPORT_TILES);
 
+        // Cache key: only rebuild tiles when the visible tile range changes.
+        // Tiles are positioned relative to tile-grid origin; the layer's own
+        // position handles camera offset so we never touch child positions.
+        const cacheKey = `${minR},${maxR},${minC},${maxC},${gameState.mapWidth}`;
+        if (this._tileCacheKey !== cacheKey) {
+            this._tileCacheKey = cacheKey;
+            this._rebuildTileLayer(gameState, minR, maxR, minC, maxC, ts);
+        }
+
+        // Move the entire tile layer to account for camera movement —
+        // individual sprites stay at fixed grid-relative positions.
+        this.tileLayer.x = offsetX;
+        this.tileLayer.y = offsetY;
+    }
+
+    /** Rebuild the tile layer from scratch (only when visible range changes). */
+    _rebuildTileLayer(gameState, minR, maxR, minC, maxC, ts) {
+        for (let i = this.tileLayer.children.length - 1; i >= 0; i--) {
+            this.tileLayer.children[i].destroy();
+        }
+        this.tileLayer.removeChildren();
 
         const drawSize = ts * SCALE;
-        // Two-pass rendering: base tiles first, then collision layer on top.
-        // This ensures wall side faces and shadows are never covered by base tiles.
 
         // === PASS 1: All base tiles ===
         for (let r = minR; r <= maxR; r++) {
             for (let c = minC; c <= maxC; c++) {
                 const tile = gameState.mapTiles[r]?.[c];
                 if (!tile || tile.base <= 0) continue;
-
-                const sx = c * ts * SCALE + offsetX;
-                const sy = r * ts * SCALE + offsetY;
+                // Positions relative to tile grid origin (no camera offset)
+                const sx = c * ts * SCALE;
+                const sy = r * ts * SCALE;
                 const tex = this.tileTextures[tile.base];
                 if (tex) {
                     const spr = new PIXI.Sprite(tex);
@@ -268,22 +288,17 @@ export class GameRenderer {
             for (let c = minC; c <= maxC; c++) {
                 const tile = gameState.mapTiles[r]?.[c];
                 if (!tile || tile.collision <= 0) continue;
-
-                const sx = c * ts * SCALE + offsetX;
-                const sy = r * ts * SCALE + offsetY;
+                const sx = c * ts * SCALE;
+                const sy = r * ts * SCALE;
                 const tex = this.tileTextures[tile.collision];
                 if (!tex) continue;
 
-                // Check tile type from game data using isWall flag
                 const tileDef = gameState.tileData[tile.collision];
                 const hasCollision = tileDef?.data?.hasCollision;
                 const isWall = !!tileDef?.data?.isWall;
                 const isObject = hasCollision && !isWall;
 
                 if (isWall) {
-                    // === WALL 3D EFFECT ===
-                    // Light from NW: bright top/left edges, cast shadow to S + E on floor.
-                    // Neighbor-aware: effect pieces only draw on edges not abutting another wall.
                     const isWallAt = (rr, cc) => {
                         const t = gameState.mapTiles[rr]?.[cc];
                         if (!t || t.collision <= 0) return false;
@@ -294,11 +309,9 @@ export class GameRenderer {
                     const wW = isWallAt(r, c - 1);
                     const wE = isWallAt(r, c + 1);
 
-                    // 1) South ground shadow — tall 3-band gradient, reads as wall depth
                     if (!wS) {
                         const sideH = Math.max(Math.round(drawSize * 0.28), 4);
                         const bandH = Math.ceil(sideH / 3);
-                        // Extend horizontally to include the SE corner under the east shadow
                         const xEnd = drawSize + (!wE ? Math.round(drawSize * 0.18) : 0);
                         const sg = new PIXI.Graphics();
                         sg.beginFill(0x000000, 0.55).drawRect(sx, sy + drawSize,             xEnd, bandH).endFill();
@@ -306,12 +319,9 @@ export class GameRenderer {
                         sg.beginFill(0x000000, 0.13).drawRect(sx, sy + drawSize + 2 * bandH, xEnd, bandH).endFill();
                         this.tileLayer.addChild(sg);
                     }
-
-                    // 2) East ground shadow — softer, narrower than south
                     if (!wE) {
                         const sideW = Math.max(Math.round(drawSize * 0.18), 3);
                         const bandW = Math.ceil(sideW / 3);
-                        // If N is also open, pull top down a hair so corner doesn't stick out
                         const startY = sy + (wN ? 0 : 2);
                         const h = (sy + drawSize) - startY;
                         const eg = new PIXI.Graphics();
@@ -320,24 +330,18 @@ export class GameRenderer {
                         eg.beginFill(0x000000, 0.10).drawRect(sx + drawSize + 2 * bandW, startY, bandW, h).endFill();
                         this.tileLayer.addChild(eg);
                     }
-
-                    // 2b) West contact AO — weaker than east (faces NW light but wall still occludes)
                     if (!wW) {
                         const sideW = Math.max(Math.round(drawSize * 0.13), 3);
                         const bandW = Math.ceil(sideW / 3);
                         const wg = new PIXI.Graphics();
-                        // Gradient fades from near-wall (right) outward (left)
                         wg.beginFill(0x000000, 0.32).drawRect(sx - bandW,         sy, bandW, drawSize).endFill();
                         wg.beginFill(0x000000, 0.18).drawRect(sx - 2 * bandW,     sy, bandW, drawSize).endFill();
                         wg.beginFill(0x000000, 0.08).drawRect(sx - 3 * bandW,     sy, bandW, drawSize).endFill();
                         this.tileLayer.addChild(wg);
                     }
-
-                    // 2c) North contact AO — weakest, short
                     if (!wN) {
                         const sideH = Math.max(Math.round(drawSize * 0.12), 3);
                         const bandH = Math.ceil(sideH / 3);
-                        // Pull in from corners if neighbors are open, so it doesn't bleed past
                         const xStart = sx + (wW ? 0 : 2);
                         const xEnd   = sx + drawSize - (wE ? 0 : 2);
                         const w = xEnd - xStart;
@@ -348,13 +352,7 @@ export class GameRenderer {
                         this.tileLayer.addChild(ng);
                     }
 
-                    // 3) Thin contour outline (1px) — skip the side that abuts another wall
-                    const outlines = [
-                        [ 1,  0, wE],
-                        [-1,  0, wW],
-                        [ 0,  1, wS],
-                        [ 0, -1, wN],
-                    ];
+                    const outlines = [[ 1,0,wE],[-1,0,wW],[0,1,wS],[0,-1,wN]];
                     for (const [ox, oy, skip] of outlines) {
                         if (skip) continue;
                         const ol = new PIXI.Sprite(tex);
@@ -364,21 +362,17 @@ export class GameRenderer {
                         this.tileLayer.addChild(ol);
                     }
 
-                    // 4) Main wall tile
                     const spr = new PIXI.Sprite(tex);
                     spr.x = sx; spr.y = sy;
                     spr.width = drawSize; spr.height = drawSize;
                     this.tileLayer.addChild(spr);
 
-                    // 5) Top-edge rim highlight (light from above) when no wall to the north
                     if (!wN) {
                         const hl = new PIXI.Graphics();
                         hl.beginFill(0xFFFFFF, 0.26).drawRect(sx, sy,     drawSize, 2).endFill();
                         hl.beginFill(0xFFFFFF, 0.11).drawRect(sx, sy + 2, drawSize, 2).endFill();
                         this.tileLayer.addChild(hl);
                     }
-
-                    // 6) Left-edge rim highlight (softer) when no wall to the west
                     if (!wW) {
                         const hl = new PIXI.Graphics();
                         hl.beginFill(0xFFFFFF, 0.14).drawRect(sx,     sy, 1, drawSize).endFill();
@@ -386,26 +380,22 @@ export class GameRenderer {
                         this.tileLayer.addChild(hl);
                     }
                 } else if (isObject) {
-                    // === COLLISION OBJECT WITH GROUND SHADOW ===
                     const shadowG = new PIXI.Graphics();
                     shadowG.beginFill(0x000000, 0.35);
                     shadowG.drawEllipse(sx + drawSize / 2, sy + drawSize * 0.9, drawSize * 0.4, drawSize * 0.12);
                     shadowG.endFill();
                     this.tileLayer.addChild(shadowG);
-
                     addSpriteWithOutline(this.tileLayer, tex, sx, sy, drawSize, drawSize);
                     const spr = new PIXI.Sprite(tex);
                     spr.x = sx; spr.y = sy;
                     spr.width = drawSize; spr.height = drawSize;
                     this.tileLayer.addChild(spr);
                 } else {
-                    // === DECORATION (non-collision) - with ground shadow ===
                     const decShadow = new PIXI.Graphics();
                     decShadow.beginFill(0x000000, 0.25);
                     decShadow.drawEllipse(sx + drawSize / 2, sy + drawSize + drawSize * 0.08, drawSize * 0.3, drawSize * 0.07);
                     decShadow.endFill();
                     this.tileLayer.addChild(decShadow);
-
                     const spr = new PIXI.Sprite(tex);
                     spr.x = sx; spr.y = sy;
                     spr.width = drawSize; spr.height = drawSize;

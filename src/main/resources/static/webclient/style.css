@@ -340,6 +340,11 @@ button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
     color: #c8a86e;
     border-bottom-color: #c8a86e;
 }
+#inv-tabs .inv-tab.drag-hover {
+    color: #6ef;
+    border-bottom-color: #6ef;
+    background: rgba(102, 238, 255, 0.12);
+}
 #equip-slots {
     border-bottom: 2px solid #4a3a50;
     padding-bottom: 6px;

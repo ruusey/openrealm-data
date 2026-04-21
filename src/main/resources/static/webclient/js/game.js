@@ -1122,8 +1122,12 @@ export class GameState {
         if (local) {
             const visualX = (local._renderX !== undefined ? local._renderX : local.pos.x) + (local._smoothX || 0);
             const visualY = (local._renderY !== undefined ? local._renderY : local.pos.y) + (local._smoothY || 0);
-            this.cameraX += (visualX - this.cameraX) * 0.35;
-            this.cameraY += (visualY - this.cameraY) * 0.35;
+            // Frame-rate independent exponential smoothing:
+            // factor = 1 - e^(-dt / halflife). With halflife ~0.03s the camera
+            // covers ~97% of the gap within 150ms regardless of frame rate.
+            const camSmooth = 1 - Math.exp(-dt / 0.03);
+            this.cameraX += (visualX - this.cameraX) * camSmooth;
+            this.cameraY += (visualY - this.cameraY) * camSmooth;
         }
     }
 

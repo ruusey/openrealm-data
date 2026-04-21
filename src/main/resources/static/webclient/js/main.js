@@ -1296,6 +1296,7 @@ function setupNetworkHandlers() {
         // Update tile size from map definitions
         if (renderer) {
             renderer.updateTileSize(data.mapId);
+            renderer.invalidateTileCache();
             game.tileSize = renderer.tileSize;
             renderer._tileDebugLogged = false; // Re-log after map change
         }
@@ -1545,19 +1546,20 @@ function processInput(dt) {
     }
     game._lastSentDirFlags = lastSentFlags;
 
-    // Interpolation between 64Hz ticks for smooth rendering at any fps
+    // Interpolation between 64Hz ticks for smooth rendering at any fps.
+    // We lerp between the pre-tick and post-tick positions rather than
+    // extrapolating past the target, which caused overshoot jitter.
     if (ticksRan > 0) {
         local._interpFromX = preTickX;
         local._interpFromY = preTickY;
         local._interpToX = local.pos.x;
         local._interpToY = local.pos.y;
     }
-    const interpFrac = simAccumulator / SIM_TICK_MS;
+    const interpFrac = simAccumulator / SIM_TICK_MS; // 0.0 – 1.0
     if (local._interpToX !== undefined) {
-        const velX = local._interpToX - (local._interpFromX || local._interpToX);
-        const velY = local._interpToY - (local._interpFromY || local._interpToY);
-        local._renderX = local._interpToX + velX * interpFrac;
-        local._renderY = local._interpToY + velY * interpFrac;
+        // Standard lerp: from + (to - from) * t
+        local._renderX = local._interpFromX + (local._interpToX - local._interpFromX) * interpFrac;
+        local._renderY = local._interpFromY + (local._interpToY - local._interpFromY) * interpFrac;
     } else {
         local._renderX = local.pos.x;
         local._renderY = local.pos.y;
@@ -2315,6 +2317,17 @@ function moveDrag(e) {
     if (!dragEl) return;
     dragEl.style.left = (e.clientX - 20) + 'px';
     dragEl.style.top = (e.clientY - 20) + 'px';
+    // Highlight bag tab when dragging over it for cross-bag transfer hint
+    const hoverTarget = document.elementFromPoint(e.clientX, e.clientY);
+    document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('drag-hover'));
+    if (hoverTarget && dragSlot >= 4 && dragSlot <= 19) {
+        const tabEl = hoverTarget.closest('.inv-tab');
+        if (tabEl) {
+            const targetBag = parseInt(tabEl.dataset.bag);
+            const fromBag = dragSlot < 12 ? 1 : 2;
+            if (targetBag && targetBag !== fromBag) tabEl.classList.add('drag-hover');
+        }
+    }
 }
 
 function endDrag(e) {
@@ -2334,6 +2347,30 @@ function endDrag(e) {
             network.sendMoveItem(game.playerId, targetIdx, dragSlot, false, false);
         }
         lastInvKey = ''; lastLootKey = '';
+    } else {
+        // Check if dropped on the OTHER bag tab — move item to first empty
+        // slot in that bag for quick cross-bag transfers.
+        const tabEl = dropTarget ? dropTarget.closest('.inv-tab') : null;
+        if (tabEl && dragSlot >= 4 && dragSlot <= 19) {
+            const targetBag = parseInt(tabEl.dataset.bag);
+            const fromBag = dragSlot < 12 ? 1 : 2;
+            if (targetBag && targetBag !== fromBag) {
+                const bagStart = targetBag === 1 ? 4 : 12;
+                const bagEnd = bagStart + 8;
+                // Find first empty slot in the target bag
+                let emptySlot = -1;
+                for (let i = bagStart; i < bagEnd; i++) {
+                    if (!game.inventory[i] || game.inventory[i].itemId < 0) {
+                        emptySlot = i;
+                        break;
+                    }
+                }
+                if (emptySlot >= 0) {
+                    network.sendMoveItem(game.playerId, emptySlot, dragSlot, false, false);
+                    lastInvKey = ''; lastLootKey = '';
+                }
+            }
+        }
     }
 
     cleanupDrag();
@@ -2342,6 +2379,7 @@ function endDrag(e) {
 function cleanupDrag() {
     dragSlot = -1;
     if (dragEl) { dragEl.remove(); dragEl = null; }
+    document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('drag-hover'));
 }
 
 document.addEventListener('mousemove', moveDrag);
