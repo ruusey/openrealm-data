@@ -2,7 +2,8 @@
 
 // Projectile behavior flags — control how a bullet moves (stored in Bullet.flags)
 export const ProjectileFlag = {
-    PLAYER_PROJECTILE: 10, PARAMETRIC: 12, INVERTED_PARAMETRIC: 13, ORBITAL: 20, ARMOR_PIERCING: 23
+    PLAYER_PROJECTILE: 10, PARAMETRIC: 12, INVERTED_PARAMETRIC: 13, ORBITAL: 20,
+    ARMOR_PIERCING: 23, PASS_THROUGH_TERRAIN: 24
 };
 
 // Entity status effects — applied on-hit or from abilities (stored in entity.effectIds)
@@ -1038,16 +1039,19 @@ export class GameState {
             if (nearPlayer) {
                 // Collision tile check — destroy bullet if center enters a collision tile
                 // (matches server proccessTerrainHit: tileBounds.inside(bulletCenter))
-                const bts = this.tileSize || 32;
-                const btx = Math.floor(bCenterX / bts);
-                const bty = Math.floor(bCenterY / bts);
-                if (this.mapTiles && btx >= 0 && btx < this.mapWidth && bty >= 0 && bty < this.mapHeight) {
-                    const bTile = this.mapTiles[bty]?.[btx];
-                    if (bTile && bTile.collision > 0) {
-                        const bTileDef = this.tileData[bTile.collision];
-                        if (bTileDef?.data?.hasCollision) {
-                            this.bullets.delete(id);
-                            continue;
+                const passThrough = b.flags && b.flags.includes(ProjectileFlag.PASS_THROUGH_TERRAIN);
+                if (!passThrough) {
+                    const bts = this.tileSize || 32;
+                    const btx = Math.floor(bCenterX / bts);
+                    const bty = Math.floor(bCenterY / bts);
+                    if (this.mapTiles && btx >= 0 && btx < this.mapWidth && bty >= 0 && bty < this.mapHeight) {
+                        const bTile = this.mapTiles[bty]?.[btx];
+                        if (bTile && bTile.collision > 0) {
+                            const bTileDef = this.tileData[bTile.collision];
+                            if (bTileDef?.data?.hasCollision) {
+                                this.bullets.delete(id);
+                                continue;
+                            }
                         }
                     }
                 }
