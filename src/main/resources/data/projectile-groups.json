@@ -885,7 +885,8 @@
 				"size": 24,
 				"magnitude": 5,
 				"flags": [
-					10
+					10,
+					24
 				],
 				"effects": [
 					{
@@ -907,7 +908,8 @@
 				"size": 24,
 				"magnitude": 5,
 				"flags": [
-					10
+					10,
+					24
 				],
 				"effects": [
 					{
@@ -929,7 +931,8 @@
 				"size": 24,
 				"magnitude": 5,
 				"flags": [
-					10
+					10,
+					24
 				],
 				"effects": [
 					{
