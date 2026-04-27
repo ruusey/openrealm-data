@@ -199,7 +199,20 @@ export class GameRenderer {
             if (this._statusLabelSlots[i]) this._statusLabelSlots[i].visible = false;
             if (this._statusBgSlots[i]) this._statusBgSlots[i].visible = false;
         }
-        // Prune stale name-pool entries every ~2 seconds
+        // Hide name-pool entries that weren't acquired this frame (entity died,
+        // walked off-screen, or unloaded). Without this the previous render's
+        // text lingers at the dead entity's last position until the slow prune
+        // cycle below runs. Done every frame; cost is one Map iteration.
+        for (const entry of this._namePool.values()) {
+            if (entry.lastSeenFrame !== this._frameId) {
+                entry.text.visible = false;
+            }
+        }
+        // Periodically destroy long-stale entries so the pool doesn't grow
+        // unboundedly across realm transitions. _destroyPooledText removes
+        // the Texture from PIXI's BaseTextureCache before destroying — without
+        // that step the underlying <canvas> leaks (this is the same caching
+        // pitfall the pool exists to fix in the first place).
         if ((this._frameId & 127) === 0) {
             const cutoff = this._frameId - 180; // ~3 seconds at 60fps
             for (const [id, entry] of this._namePool) {
