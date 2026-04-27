@@ -153,6 +153,22 @@ export class GameNetwork {
         this.send(PacketWriters.text(from, to, message));
     }
 
+    sendConsumeShardStack(playerId, fromSlot) {
+        this.send(PacketWriters.consumeShardStack(playerId, fromSlot));
+    }
+
+    sendInteractTile(playerId, tileX, tileY) {
+        this.send(PacketWriters.interactTile(playerId, tileX, tileY));
+    }
+
+    sendForgeEnchant(playerId, targetItemSlot, crystalItemId, crystalSlotIndex, essenceSlotIndex, pixelX, pixelY) {
+        this.send(PacketWriters.forgeEnchant(playerId, targetItemSlot, crystalItemId, crystalSlotIndex, essenceSlotIndex, pixelX, pixelY));
+    }
+
+    sendForgeDisenchant(playerId, targetItemSlot) {
+        this.send(PacketWriters.forgeDisenchant(playerId, targetItemSlot));
+    }
+
     disconnect() {
         this.stopHeartbeat();
         if (this.ws) {

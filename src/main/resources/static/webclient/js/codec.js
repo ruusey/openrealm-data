@@ -147,20 +147,55 @@ export const NetEffect = {
     }
 };
 
-export const NetGameItem = {
+export const NetEnchantment = {
     read(r) {
         return {
+            statId: r.readByte(), deltaValue: r.readByte(),
+            pixelX: r.readByte(), pixelY: r.readByte(),
+            pixelColor: r.readInt()
+        };
+    },
+    write(w, e) {
+        w.writeByte(e.statId); w.writeByte(e.deltaValue);
+        w.writeByte(e.pixelX); w.writeByte(e.pixelY);
+        w.writeInt(e.pixelColor);
+    }
+};
+
+export const NetGameItem = {
+    read(r) {
+        const base = {
             itemId: r.readInt(), uid: r.readString(), name: r.readString(), description: r.readString(),
             stats: NetStats.read(r), damage: NetDamage.read(r), effect: NetEffect.read(r),
             consumable: r.readBoolean(), tier: r.readByte(), targetSlot: r.readByte(),
-            targetClass: r.readByte(), fameBonus: r.readByte()
+            targetClass: r.readByte(), fameBonus: r.readByte(),
+            stackable: r.readBoolean(),
+            maxStack: r.readInt(),
+            stackCount: r.readInt(),
+            category: r.readString(),
+            forgeStatId: r.readByte(),
+            forgeSlotId: r.readByte()
         };
+        const enchCount = r.readInt();
+        const enchantments = [];
+        for (let i = 0; i < enchCount; i++) enchantments.push(NetEnchantment.read(r));
+        base.enchantments = enchantments;
+        return base;
     },
     write(w, item) {
         w.writeInt(item.itemId); w.writeString(item.uid); w.writeString(item.name); w.writeString(item.description);
         NetStats.write(w, item.stats); NetDamage.write(w, item.damage); NetEffect.write(w, item.effect);
         w.writeBoolean(item.consumable); w.writeByte(item.tier); w.writeByte(item.targetSlot);
         w.writeByte(item.targetClass); w.writeByte(item.fameBonus);
+        w.writeBoolean(!!item.stackable);
+        w.writeInt(item.maxStack || 1);
+        w.writeInt(item.stackCount || 1);
+        w.writeString(item.category || 'generic');
+        w.writeByte(item.forgeStatId == null ? -1 : item.forgeStatId);
+        w.writeByte(item.forgeSlotId == null ? -1 : item.forgeSlotId);
+        const ench = item.enchantments || [];
+        w.writeInt(ench.length);
+        for (const e of ench) NetEnchantment.write(w, e);
     }
 };
 
@@ -267,7 +302,9 @@ export const PacketId = {
     PLAYER_DEATH: 15, REQUEST_TRADE: 16, ACCEPT_TRADE: 17,
     UPDATE_TRADE_SELECTION: 18, UPDATE_TRADE: 19, DEATH_ACK: 20,
     CREATE_EFFECT: 21, LOGIN_ACK: 22, GLOBAL_PLAYER_POSITION: 23,
-    PLAYER_STATE: 24, COMPACT_MOVE: 25, PLAYER_POS_ACK: 26
+    PLAYER_STATE: 24, COMPACT_MOVE: 25, PLAYER_POS_ACK: 26,
+    CONSUME_SHARD_STACK: 27, INTERACT_TILE: 28, OPEN_FORGE: 29,
+    FORGE_ENCHANT: 30, FORGE_DISENCHANT: 31
 };
 
 // ---- Packet Readers (server → client packets read from binary) ----
@@ -378,7 +415,8 @@ export const PacketReaders = {
     },
     [PacketId.PLAYER_POS_ACK](r) {
         return { seq: r.readInt(), posX: r.readFloat(), posY: r.readFloat() };
-    }
+    },
+    [PacketId.OPEN_FORGE](r) { return { playerId: r.readLong() }; }
 };
 
 // ---- Packet Writers (client → server packets serialized to binary) ----
@@ -465,6 +503,32 @@ export const PacketWriters = {
 
     deathAck(playerId) {
         return buildPacket(PacketId.DEATH_ACK, w => { w.writeLong(playerId); });
+    },
+
+    consumeShardStack(playerId, fromSlot) {
+        return buildPacket(PacketId.CONSUME_SHARD_STACK, w => {
+            w.writeLong(playerId); w.writeByte(fromSlot);
+        });
+    },
+
+    interactTile(playerId, tileX, tileY) {
+        return buildPacket(PacketId.INTERACT_TILE, w => {
+            w.writeLong(playerId); w.writeInt(tileX); w.writeInt(tileY);
+        });
+    },
+
+    forgeEnchant(playerId, targetItemSlot, crystalItemId, crystalSlotIndex, essenceSlotIndex, pixelX, pixelY) {
+        return buildPacket(PacketId.FORGE_ENCHANT, w => {
+            w.writeLong(playerId); w.writeByte(targetItemSlot); w.writeInt(crystalItemId);
+            w.writeByte(crystalSlotIndex); w.writeByte(essenceSlotIndex);
+            w.writeByte(pixelX); w.writeByte(pixelY);
+        });
+    },
+
+    forgeDisenchant(playerId, targetItemSlot) {
+        return buildPacket(PacketId.FORGE_DISENCHANT, w => {
+            w.writeLong(playerId); w.writeByte(targetItemSlot);
+        });
     }
 };
 
@@ -478,7 +542,9 @@ const PACKET_NAMES = {
     15:'PLAYER_DEATH', 16:'REQUEST_TRADE', 17:'ACCEPT_TRADE',
     18:'UPDATE_TRADE_SELECTION', 19:'UPDATE_TRADE', 20:'DEATH_ACK',
     21:'CREATE_EFFECT', 22:'LOGIN_ACK', 23:'GLOBAL_PLAYER_POSITION',
-    24:'PLAYER_STATE'
+    24:'PLAYER_STATE',
+    27:'CONSUME_SHARD_STACK', 28:'INTERACT_TILE', 29:'OPEN_FORGE',
+    30:'FORGE_ENCHANT', 31:'FORGE_DISENCHANT'
 };
 
 export function parseFrame(arrayBuffer) {

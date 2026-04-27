@@ -85,6 +85,9 @@
           <label><input type="checkbox" id="detailSlows"> Slows</label>
           <label><input type="checkbox" id="detailDamaging"> Damaging</label>
           <label><input type="checkbox" id="detailIsWall"> Wall</label>
+          <label>Interaction:
+            <input type="text" id="detailInteraction" placeholder="(none)" style="width:80px">
+          </label>
         </div>
         <div class="detail-preview">
           <span>Preview:</span>
@@ -295,6 +298,38 @@
           <label>Class: <input type="number" id="itemClass"></label>
           <label>Fame: <input type="number" id="itemFame" min="0"></label>
           <label><input type="checkbox" id="itemConsumable"> Consumable</label>
+          <label><input type="checkbox" id="itemStackable"> Stackable</label>
+          <label>Max Stack: <input type="number" id="itemMaxStack" min="1" value="1"></label>
+          <label>Category:
+            <select id="itemCategory">
+              <option value="generic">generic</option>
+              <option value="shard">shard</option>
+              <option value="crystal">crystal</option>
+              <option value="essence">essence</option>
+            </select>
+          </label>
+          <label>Forge Stat:
+            <select id="itemForgeStatId">
+              <option value="-1">(none)</option>
+              <option value="0">VIT</option>
+              <option value="1">WIS</option>
+              <option value="2">HP</option>
+              <option value="3">MP</option>
+              <option value="4">ATT</option>
+              <option value="5">DEF</option>
+              <option value="6">SPD</option>
+              <option value="7">DEX</option>
+            </select>
+          </label>
+          <label>Forge Slot:
+            <select id="itemForgeSlotId">
+              <option value="-1">(none)</option>
+              <option value="0">Weapon</option>
+              <option value="1">Ability</option>
+              <option value="2">Armor</option>
+              <option value="3">Ring</option>
+            </select>
+          </label>
         </div>
         <label style="font-size:12px;display:block;margin-bottom:6px">Description:<br>
           <input type="text" id="itemDesc" style="width:100%">

@@ -390,6 +390,14 @@ button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
 .tier-0 { color: #aaa; } .tier-1 { color: #40c040; } .tier-2 { color: #4080e0; }
 .tier-3 { color: #c040c0; } .tier-4 { color: #c8a86e; } .tier-5 { color: #ff4040; }
 
+.inv-slot .item-stack {
+    position: absolute; bottom: 1px; right: 2px;
+    font-size: 9px; font-weight: bold;
+    color: #ffd86b;
+    text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
+    pointer-events: none;
+}
+
 #ground-loot-panel {
     background: #1a1218cc;
     border: 1px solid #3a2a38;
@@ -699,6 +707,151 @@ button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
 }
 #portal-enter-btn:hover { background: #9050d0; }
 
+#interact-prompt {
+    position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%);
+    z-index: 15; pointer-events: auto;
+    background: #2a1f18ee; border: 2px solid #c8a86e;
+    border-radius: 6px; padding: 5px 12px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 2px 8px rgba(200,168,110,0.4);
+}
+#interact-label {
+    color: #ffd86b; font-size: 12px; font-weight: bold;
+}
+#interact-btn {
+    padding: 4px 10px; background: #c8a86e; color: #1a1218;
+    border: none; border-radius: 4px; font-size: 11px; font-weight: 700;
+    cursor: pointer; width: auto;
+}
+#interact-btn:hover { background: #d8b87e; }
+
+/* ============================================================
+ * Forge modal
+ * ============================================================ */
+.modal-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+}
+.modal-overlay[hidden] { display: none; }
+#forge-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    cursor: pointer;
+}
+#forge-panel {
+    position: relative; z-index: 101;
+    width: 760px; max-width: 95vw; max-height: 92vh;
+    background: #1a1218; border: 2px solid #c8a86e; border-radius: 8px;
+    color: #e8d8b8; font-family: monospace;
+    display: flex; flex-direction: column;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+}
+.forge-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px; border-bottom: 1px solid #3a2a38;
+}
+.forge-header h2 { margin: 0; font-size: 18px; letter-spacing: 4px; color: #ffd86b; }
+#forge-close-btn {
+    background: none; border: none; color: #c8a86e; font-size: 22px;
+    cursor: pointer; padding: 0 6px; line-height: 1;
+}
+#forge-close-btn:hover { color: #ffd86b; }
+.forge-body {
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    gap: 14px; padding: 18px; align-items: start;
+}
+.forge-inputs, .forge-output { display: flex; flex-direction: column; gap: 10px; }
+.forge-output { align-items: center; }
+.forge-section-header {
+    font-size: 10px; letter-spacing: 3px; color: #8a7058;
+    border-bottom: 1px solid #3a2a38; padding-bottom: 4px;
+    text-align: center;
+}
+.forge-arrow {
+    font-size: 28px; color: #c8a86e; padding-top: 60px;
+    text-align: center; user-select: none;
+}
+.forge-output-frame {
+    position: relative;
+    border: 2px solid #c8a86e; border-radius: 4px;
+    background: #0f0a14; padding: 4px;
+}
+.forge-output-hint {
+    position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+    font-size: 9px; color: #6a5a68; white-space: nowrap;
+    letter-spacing: 1px;
+}
+.forge-row { display: flex; flex-direction: column; gap: 4px; }
+.forge-row-label { font-size: 11px; color: #c8a86e; letter-spacing: 1px; }
+.forge-dropzone {
+    width: 100%; min-height: 84px;
+    background: #0f0a14; border: 2px dashed #4a3a48;
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    transition: border-color 0.1s ease;
+}
+.forge-dropzone.drag-hover { border-color: #ffd86b; background: #1a1018; }
+.forge-dropzone.filled { border-style: solid; border-color: #c8a86e; }
+.forge-zone-hint {
+    color: #6a5a68; font-size: 11px; text-align: center; padding: 0 8px;
+}
+.forge-dropzone img {
+    width: 64px; height: 64px;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+}
+.forge-dropzone .forge-zone-detail {
+    position: absolute; top: 4px; right: 6px;
+    font-size: 10px; color: #ffd86b;
+}
+.forge-right {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.forge-status {
+    font-size: 11px; color: #b8a89a; min-height: 14px;
+    text-align: center;
+}
+#forge-pixel-canvas {
+    width: 256px; height: 256px;
+    background: #0f0a14;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    cursor: crosshair;
+    display: block;
+}
+.forge-cost {
+    font-size: 11px; color: #b8a89a; text-align: center; min-height: 14px;
+}
+.forge-cost .ok { color: #5fd06f; }
+.forge-cost .bad { color: #ff6060; }
+.forge-footer {
+    display: flex; justify-content: flex-end; gap: 10px;
+    padding: 12px 18px; border-top: 1px solid #3a2a38;
+}
+.forge-btn {
+    padding: 7px 16px; background: #2a2030; color: #c8a86e;
+    border: 1px solid #4a3a48; border-radius: 4px;
+    font-family: inherit; font-size: 12px; cursor: pointer;
+}
+.forge-btn:hover:not(:disabled) { background: #3a2a40; color: #ffd86b; }
+.forge-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.forge-btn-primary { background: #c8a86e; color: #1a1218; border-color: #ffd86b; font-weight: 700; }
+.forge-btn-primary:hover:not(:disabled) { background: #ffd86b; color: #1a1218; }
+.forge-btn-danger { color: #ff6060; border-color: #6a3030; }
+.forge-btn-danger:hover { background: #3a1818; color: #ff8080; }
+
+@media (max-width: 720px) {
+    .forge-body { grid-template-columns: 1fr; }
+    .forge-arrow { padding-top: 0; transform: rotate(90deg); }
+    #forge-pixel-canvas { width: 192px; height: 192px; }
+}
+
+/* When the forge modal is open, lift the inventory HUD above the modal
+ * backdrop so the user can drag from inventory slots into the forge zones.
+ * Without this, the backdrop intercepts mousedown on the HUD. */
+body.forge-open #hud { z-index: 200; }
+body.forge-open #ground-loot-panel { z-index: 200; }
+
 #touch-aim {
     position: absolute; bottom: 30px; right: 320px;
     z-index: 15; pointer-events: auto;
@@ -828,6 +981,7 @@ button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
     #connection-status { font-size: 10px; padding: 2px 6px; }
     /* Portal prompt: smaller on mobile */
     #portal-prompt { bottom: 16px; padding: 4px 8px; gap: 6px; }
+    #interact-prompt { bottom: 56px; padding: 4px 8px; gap: 6px; }
     #portal-name { font-size: 10px; }
     #portal-enter-btn { padding: 3px 8px; font-size: 10px; }
     .login-box, .charselect-box { width: 90vw; max-width: 400px; padding: 16px; }

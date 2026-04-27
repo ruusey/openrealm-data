@@ -14,6 +14,7 @@ import { PacketId, PacketWriters } from './codec.js';
 import { initTradeUI, updateNearbyPlayers } from './trade.js';
 import { initTouchControls, isTouchDevice, getJoystickDir, getAimDir, setDoubleTapHandler } from './touch.js';
 import { Minimap } from './minimap.js';
+import { initForgeUI, openForgeModal, closeForgeModal, isForgeOpen, tryForgeDrop, notifyInventoryChanged as forgeInventoryChanged } from './forge.js';
 
 // --- App State ---
 const api = new ApiClient();
@@ -1343,7 +1344,10 @@ function setupNetworkHandlers() {
     network.on(PacketId.UPDATE, (data) => {
         game.handleUpdate(data);
         // Force inv refresh when our inventory updates
-        if (data.playerId === game.playerId) { lastInvKey = ''; lastLootKey = ''; }
+        if (data.playerId === game.playerId) {
+            lastInvKey = ''; lastLootKey = '';
+            forgeInventoryChanged();
+        }
     });
 
     network.on(PacketId.TEXT, (data) => {
@@ -1408,10 +1412,34 @@ function setupNetworkHandlers() {
         });
     });
 
+    network.on(PacketId.OPEN_FORGE, (data) => {
+        if (data && data.playerId != null) openForgeModal();
+    });
+
     // Trading handlers managed by trade.js module
     initTradeUI(game, network, addChatMessage, () => {
         lastInvKey = ''; lastLootKey = '';
     });
+
+    // Forge UI handlers (forge.js module). Expose getItemSpriteUrl so the
+    // forge can render the dropped sprite in its zones and pixel editor.
+    window.getItemSpriteUrl = getItemSpriteUrl;
+    window.getItemBaseSpriteUrl = (item) => {
+        // Always return the un-enchanted sprite for use in the pixel editor.
+        if (!item) return null;
+        const def = game.itemData?.[item.itemId];
+        if (!def || !def.spriteKey) return null;
+        if (renderer) {
+            const url = renderer.getSpriteDataUrl(def.spriteKey, def.col || 0, def.row || 0,
+                def.spriteSize || 8, def.spriteHeight || 0);
+            if (url) return url;
+        }
+        _ensureSpriteSheet(def.spriteKey);
+        return _extractSprite(def.spriteKey, def.col || 0, def.row || 0, def.spriteSize || 8, def.spriteHeight || 0);
+    };
+    initForgeUI({ game, network, renderer, refreshInventory: () => {
+        lastInvKey = ''; lastLootKey = '';
+    }});
 }
 
 // --- Performance Metrics ---
@@ -1558,8 +1586,6 @@ function processInput(dt) {
     const rotLeftKey = b.rotateLeft || 'KeyQ';
     const rotRightKey = b.rotateRight || 'KeyE';
     const resetCamKey = b.resetCamera || 'KeyC';
-    const isRotating = (input.isKeyDown(rotLeftKey) || input.isKeyDown(rotRightKey))
-        && !input.chatMode && !input.menuOpen;
     if (input.isKeyDown(rotLeftKey) && !input.chatMode && !input.menuOpen) {
         game.cameraAngle += CAM_ROTATE_SPEED * dt;
     }
@@ -1569,19 +1595,6 @@ function processInput(dt) {
     if (input.isKeyDown(resetCamKey) && !input.chatMode && !input.menuOpen) {
         input.keys[resetCamKey] = false;
         game.cameraAngle = 0;
-    }
-    // Snap to nearest 45° when not actively rotating (so movement aligns with visuals)
-    if (!isRotating && game.cameraAngle !== 0) {
-        const SNAP = Math.PI / 4; // 45 degrees
-        const target = Math.round(game.cameraAngle / SNAP) * SNAP;
-        // Normalize near-zero to exactly zero
-        const snapTarget = Math.abs(target) < 0.01 ? 0 : target;
-        const diff = snapTarget - game.cameraAngle;
-        if (Math.abs(diff) > 0.001) {
-            game.cameraAngle += diff * Math.min(1, dt * 12); // smooth snap
-        } else {
-            game.cameraAngle = snapTarget;
-        }
     }
 
     // Sample screen-space direction, then rotate to world-space for server
@@ -1877,17 +1890,21 @@ function processInput(dt) {
         }
     }
 
-    // F = Pick up from nearest loot container (first item to first empty slot)
+    // F = Interact with nearby tile (forge, etc.) if any, else pick up loot
     const lootKey = b.lootPickup || 'KeyF';
     if (input.isKeyDown(lootKey) && !input.chatMode && !input.menuOpen) {
         input.keys[lootKey] = false;
-        const loot = game.getNearbyLootContainer(64);
-        if (loot && loot.items) {
-            for (let i = 0; i < loot.items.length; i++) {
-                if (loot.items[i] && loot.items[i].itemId > 0) {
-                    // Pick up from ground slot 20+i
-                    network.sendMoveItem(game.playerId, -1, 20 + i, false, false);
-                    break;
+        if (_interactCandidate) {
+            triggerNearbyInteract();
+        } else {
+            const loot = game.getNearbyLootContainer(64);
+            if (loot && loot.items) {
+                for (let i = 0; i < loot.items.length; i++) {
+                    if (loot.items[i] && loot.items[i].itemId > 0) {
+                        // Pick up from ground slot 20+i
+                        network.sendMoveItem(game.playerId, -1, 20 + i, false, false);
+                        break;
+                    }
                 }
             }
         }
@@ -2056,6 +2073,71 @@ function updateHUD() {
     } else {
         portalPrompt.style.display = 'none';
     }
+
+    // Interactive tile prompt — scan a 5x5 region around the player for any tile
+    // whose definition has a non-empty interactionType. Currently only "forge".
+    updateInteractPrompt(local);
+}
+
+// Tracks the candidate tile shown in the interact prompt so the click/key
+// handler knows what to send.
+let _interactCandidate = null; // {tileX, tileY, type}
+
+function updateInteractPrompt(local) {
+    const prompt = document.getElementById('interact-prompt');
+    if (!prompt) return;
+    if (!local || !game.mapTiles || !game.tileData) {
+        prompt.style.display = 'none';
+        _interactCandidate = null;
+        return;
+    }
+    const ts = game.tileSize || 32;
+    const px = Math.floor(local.pos.x / ts);
+    const py = Math.floor(local.pos.y / ts);
+    let found = null;
+    let bestDist = Infinity;
+    // 5x5 search window (3-tile radius, capped at distance 3)
+    for (let dy = -2; dy <= 2 && !found; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+            const tx = px + dx, ty = py + dy;
+            if (ty < 0 || tx < 0) continue;
+            const row = game.mapTiles[ty];
+            if (!row) continue;
+            const cell = row[tx];
+            if (!cell) continue;
+            // Check both layers for an interactive definition
+            const ids = [cell.collision, cell.base];
+            for (const id of ids) {
+                if (id == null || id < 0) continue;
+                const def = game.tileData[id];
+                if (!def || !def.interactionType) continue;
+                const cx = (tx + 0.5) * ts;
+                const cy = (ty + 0.5) * ts;
+                const d2 = (cx - local.pos.x) * (cx - local.pos.x) + (cy - local.pos.y) * (cy - local.pos.y);
+                if (d2 < bestDist) {
+                    bestDist = d2;
+                    found = { tileX: tx, tileY: ty, type: def.interactionType, name: def.name || def.interactionType };
+                }
+            }
+        }
+    }
+    if (found && bestDist <= (3 * ts) * (3 * ts)) {
+        _interactCandidate = found;
+        const label = document.getElementById('interact-label');
+        const btn = document.getElementById('interact-btn');
+        const verb = found.type === 'forge' ? 'Use Forge' : `Use ${found.name}`;
+        if (label) label.textContent = verb + ' (F)';
+        if (btn) btn.textContent = 'Use';
+        prompt.style.display = 'flex';
+    } else {
+        _interactCandidate = null;
+        prompt.style.display = 'none';
+    }
+}
+
+export function triggerNearbyInteract() {
+    if (!_interactCandidate || game.playerId == null) return;
+    network.sendInteractTile(game.playerId, _interactCandidate.tileX, _interactCandidate.tileY);
 }
 
 // --- Inventory System ---
@@ -2106,26 +2188,69 @@ function _extractSprite(spriteKey, col, row, spriteSize, spriteHeight) {
 
 function getItemSpriteUrl(item) {
     if (!item || item.itemId < 0) return null;
-    const cacheKey = item.itemId;
-    if (spriteCache[cacheKey]) return spriteCache[cacheKey];
 
     // Try game.itemData first, fall back to preloaded defs for char select screen
     const itemDef = game.itemData[item.itemId] || _graveyardItemDefs?.[item.itemId] || item;
     if (!itemDef.spriteKey) return null;
 
-    // Prefer renderer if available (in-game), otherwise use canvas extraction
-    let url = null;
+    // Cache by (itemId, uid, enchantments-hash). Items without enchantments share
+    // the cache entry across instances (cacheKey = itemId).
+    const ench = item.enchantments || [];
+    let cacheKey;
+    if (ench.length === 0) {
+        cacheKey = `${item.itemId}`;
+    } else {
+        const sig = ench.map(e => `${e.pixelX},${e.pixelY},${e.pixelColor}`).join('|');
+        cacheKey = `${item.itemId}#${item.uid || ''}#${sig}`;
+    }
+    if (spriteCache[cacheKey]) return spriteCache[cacheKey];
+
+    // Get the base sprite data URL
+    let baseUrl = null;
     if (renderer) {
-        url = renderer.getSpriteDataUrl(itemDef.spriteKey, itemDef.col || 0,
+        baseUrl = renderer.getSpriteDataUrl(itemDef.spriteKey, itemDef.col || 0,
             itemDef.row || 0, itemDef.spriteSize || 8, itemDef.spriteHeight || 0);
     }
-    if (!url) {
+    if (!baseUrl) {
         _ensureSpriteSheet(itemDef.spriteKey);
-        url = _extractSprite(itemDef.spriteKey, itemDef.col || 0,
+        baseUrl = _extractSprite(itemDef.spriteKey, itemDef.col || 0,
             itemDef.row || 0, itemDef.spriteSize || 8, itemDef.spriteHeight || 0);
     }
-    if (url) { spriteCache[cacheKey] = url; return url; }
-    return null;
+    if (!baseUrl) return null;
+
+    // No enchantments — return base URL directly
+    if (ench.length === 0) {
+        spriteCache[cacheKey] = baseUrl;
+        return baseUrl;
+    }
+
+    // Composite enchantment pixels onto the base sprite via canvas. The image
+    // load is async, so synchronously return the base URL while a re-render
+    // happens once the composite finishes — we cache the composite for next call.
+    const sw = itemDef.spriteSize || 8;
+    const sh = itemDef.spriteHeight || sw;
+    const tmp = document.createElement('canvas');
+    tmp.width = sw; tmp.height = sh;
+    const ctx = tmp.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const img = new Image();
+    img.onload = () => {
+        ctx.drawImage(img, 0, 0, sw, sh);
+        for (const e of ench) {
+            const a = ((e.pixelColor >>> 24) & 0xff) / 255;
+            const r = (e.pixelColor >>> 16) & 0xff;
+            const g = (e.pixelColor >>> 8) & 0xff;
+            const b = e.pixelColor & 0xff;
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a || 1})`;
+            ctx.fillRect(e.pixelX, e.pixelY, 1, 1);
+        }
+        spriteCache[cacheKey] = tmp.toDataURL();
+        // Force inventory rebuild on the next frame so the painted sprite shows
+        lastInvKey = '';
+    };
+    img.src = baseUrl;
+    // First call: hand back the base URL while the composite renders in the background
+    return baseUrl;
 }
 
 function updateInventoryUI() {
@@ -2133,7 +2258,7 @@ function updateInventoryUI() {
     const invEl = document.getElementById('inv-slots');
 
     // Only rebuild if inventory changed
-    const invKey = game.inventory.map(i => i ? i.itemId : -1).join(',') + ':' + selectedSlot + ':bag' + activeBag;
+    const invKey = game.inventory.map(i => i ? `${i.itemId}x${i.stackCount || 1}#${(i.enchantments || []).length}` : -1).join(',') + ':' + selectedSlot + ':bag' + activeBag;
     if (!updateInventoryUI._logged && game.inventory.length > 0) {
         updateInventoryUI._logged = true;
         // Inventory log removed for performance
@@ -2477,6 +2602,14 @@ function createSlot(item, label, slotIdx, isLoot = false) {
             tierEl.textContent = `T${item.tier}`;
             div.appendChild(tierEl);
         }
+
+        // Stack count overlay (×N) for stackable items with count > 1
+        if (item.stackable && (item.stackCount || 1) > 1) {
+            const stackEl = document.createElement('span');
+            stackEl.className = 'item-stack';
+            stackEl.textContent = `×${item.stackCount}`;
+            div.appendChild(stackEl);
+        }
     }
 
     const lbl = document.createElement('span');
@@ -2590,9 +2723,15 @@ function onSlotRightClick(slotIdx, item) {
         onSlotClick(slotIdx, item, true);
         return;
     }
+    // Full shard stack of 10? Right-click forges it into a Crystal in place.
+    if (item && item.category === 'shard' && (item.stackCount || 0) >= 10
+            && slotIdx >= 4 && slotIdx <= 19) {
+        network.sendConsumeShardStack(game.playerId, slotIdx);
+        lastInvKey = '';
+        return;
+    }
     // Right-click: drop item to ground
     if (item && item.itemId >= 0 && slotIdx >= 0 && slotIdx <= 19) {
-        // console.log(`[INV] Dropping item from slot ${slotIdx}`);
         network.sendMoveItem(game.playerId, -1, slotIdx, true, false);
         lastInvKey = '';
     }
@@ -2669,6 +2808,18 @@ function moveDrag(e) {
             }
         }
     }
+    // Highlight forge dropzone under cursor (modal is open)
+    if (isForgeOpen()) {
+        document.querySelectorAll('.forge-dropzone').forEach(z => z.classList.remove('drag-hover'));
+        const hover = document.elementFromPoint(e.clientX, e.clientY);
+        const zone = hover ? hover.closest('.forge-dropzone') : null;
+        if (zone) {
+            zone.classList.add('drag-hover');
+            window.__forgeHoverZone = zone.dataset.zone;
+        } else {
+            window.__forgeHoverZone = null;
+        }
+    }
 }
 
 function endDrag(e) {
@@ -2676,6 +2827,16 @@ function endDrag(e) {
 
     // Find which slot we dropped on
     const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
+
+    // Forge dropzone takes precedence when the modal is open
+    if (isForgeOpen()) {
+        const fz = dropTarget ? dropTarget.closest('.forge-dropzone') : null;
+        if (fz && tryForgeDrop(dragSlot, fz.dataset.zone)) {
+            cleanupDrag();
+            return;
+        }
+    }
+
     const slotEl = dropTarget ? dropTarget.closest('.inv-slot') : null;
     const targetIdx = slotEl ? parseInt(slotEl.dataset.slotIdx) : -1;
 
@@ -2939,6 +3100,10 @@ document.getElementById('portal-enter-btn')?.addEventListener('click', () => {
     if (closest && closestDist < 64) {
         doRealmTransition(closest, false);
     }
+});
+
+document.getElementById('interact-btn')?.addEventListener('click', () => {
+    triggerNearbyInteract();
 });
 
 // --- Init ---

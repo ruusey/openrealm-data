@@ -244,6 +244,61 @@
         <button id="portal-enter-btn">Enter</button>
     </div>
 
+    <!-- Interactive tile (forge, etc.) proximity UI -->
+    <div id="interact-prompt" style="display:none">
+        <span id="interact-label">Use Forge</span>
+        <button id="interact-btn">Use</button>
+    </div>
+
+    <!-- Forge modal: pixel-edit enchantments onto an item using crystals + essence -->
+    <div id="forge-modal" class="modal-overlay" hidden>
+        <div id="forge-backdrop"></div>
+        <div id="forge-panel" role="dialog" aria-label="Forge">
+            <div class="forge-header">
+                <h2>FORGE</h2>
+                <button id="forge-close-btn" type="button" aria-label="Close">×</button>
+            </div>
+            <div class="forge-body">
+                <div class="forge-inputs">
+                    <div class="forge-section-header">INPUTS</div>
+                    <div class="forge-row">
+                        <div class="forge-row-label">Target Item</div>
+                        <div id="forge-target-slot" class="forge-dropzone" data-zone="target">
+                            <span class="forge-zone-hint">Drag an item here</span>
+                        </div>
+                    </div>
+                    <div class="forge-row">
+                        <div class="forge-row-label">Crystal</div>
+                        <div id="forge-crystal-slot" class="forge-dropzone" data-zone="crystal">
+                            <span class="forge-zone-hint">Drag a Crystal here</span>
+                        </div>
+                    </div>
+                    <div class="forge-row">
+                        <div class="forge-row-label">Essence</div>
+                        <div id="forge-essence-slot" class="forge-dropzone" data-zone="essence">
+                            <span class="forge-zone-hint">Drag matching Essence here</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="forge-arrow">→</div>
+                <div class="forge-output">
+                    <div class="forge-section-header">OUTPUT</div>
+                    <div id="forge-status" class="forge-status">Drop a target item to begin.</div>
+                    <div class="forge-output-frame">
+                        <canvas id="forge-pixel-canvas" width="256" height="256"></canvas>
+                        <div class="forge-output-hint">Click a pixel to paint</div>
+                    </div>
+                    <div id="forge-cost" class="forge-cost"></div>
+                </div>
+            </div>
+            <div class="forge-footer">
+                <button id="forge-disenchant-btn" type="button" class="forge-btn forge-btn-danger">Remove All</button>
+                <button id="forge-confirm-btn" type="button" class="forge-btn forge-btn-primary" disabled>Forge</button>
+                <button id="forge-cancel-btn" type="button" class="forge-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- In-game options menu overlay. Rendered on top of the game screen
          while the game keeps ticking behind it. Closed via ESC, backdrop
          click, "Return to Game" button, or the Home Menu button. -->

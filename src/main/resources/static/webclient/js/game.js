@@ -343,8 +343,8 @@ export class GameState {
         if (!yBlocked) entity.pos.y = origY + effDy;
     }
 
-    // Computed stats = base stats + equipment bonuses (slots 0-3)
-    // Matches Java Player.getComputedStats()
+    // Computed stats = base stats + equipment bonuses + enchantment bonuses
+    // (slots 0-3). Matches Java Player.getComputedStats().
     getComputedStats() {
         if (!this.stats) return null;
         const s = { ...this.stats };
@@ -359,6 +359,22 @@ export class GameState {
                 s.dex += item.stats.dex || 0;
                 s.vit += item.stats.vit || 0;
                 s.wis += item.stats.wis || 0;
+            }
+            // Pixel-forge enchantments: +deltaValue per enchantment, keyed by statId
+            if (item && item.enchantments && item.enchantments.length > 0) {
+                for (const e of item.enchantments) {
+                    const d = e.deltaValue || 0;
+                    switch (e.statId) {
+                        case 0: s.vit += d; break;
+                        case 1: s.wis += d; break;
+                        case 2: s.hp += d; break;
+                        case 3: s.mp += d; break;
+                        case 4: s.att += d; break;
+                        case 5: s.def += d; break;
+                        case 6: s.spd += d; break;
+                        case 7: s.dex += d; break;
+                    }
+                }
             }
         }
         return s;
@@ -386,6 +402,19 @@ export class GameState {
             const vals = [s.hp, s.mp, s.def, s.att, s.spd, s.dex, s.vit, s.wis];
             const bonuses = vals.map((v, i) => v !== 0 ? `${v > 0 ? '+' : ''}${v} ${statNames[i]}` : null).filter(Boolean);
             if (bonuses.length) lines.push(bonuses.join(', '));
+        }
+        // Forged enchantments — show breakdown per enchantment
+        if (item.enchantments && item.enchantments.length > 0) {
+            const statLabel = ['VIT','WIS','HP','MP','ATT','DEF','SPD','DEX'];
+            lines.push(`Forged (${item.enchantments.length}/5):`);
+            for (const e of item.enchantments) {
+                const lab = statLabel[e.statId] || '?';
+                const v = e.deltaValue || 1;
+                lines.push(`  +${v} ${lab}`);
+            }
+        }
+        if (item.stackable && (item.stackCount || 1) > 1) {
+            lines.push(`Stack: ×${item.stackCount}/${item.maxStack}`);
         }
         if (item.consumable) lines.push('Consumable');
         const cls = item.targetClass;

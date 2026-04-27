@@ -1,6 +1,6 @@
 package com.openrealm.data.dto;
 
-import java.util.List;
+import java.io.Serializable;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -9,7 +9,6 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 @Data
@@ -18,14 +17,12 @@ import lombok.NoArgsConstructor;
 @Builder
 @JsonInclude(Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
-@EqualsAndHashCode(callSuper=false)
-public class GameItemRefDto extends TemporalDto {
-	private static final long serialVersionUID = -5119762736198793613L;
+public class EnchantmentDto implements Serializable {
+    private static final long serialVersionUID = 1L;
 
-	private String gameItemRefId;
-	private Integer itemId;
-	private Integer slotIdx;
-	private String itemUuid;
-	private Integer stackCount;
-	private List<EnchantmentDto> enchantments;
+    private Byte statId;
+    private Byte deltaValue;
+    private Byte pixelX;
+    private Byte pixelY;
+    private Integer pixelColor;
 }

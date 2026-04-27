@@ -388,6 +388,9 @@ function showDetail(tile) {
   document.getElementById('detailSlows').checked = !!(tile.data && tile.data.slows);
   document.getElementById('detailDamaging').checked = !!(tile.data && tile.data.damaging);
   document.getElementById('detailIsWall').checked = !!(tile.data && tile.data.isWall);
+  if (document.getElementById('detailInteraction')) {
+    document.getElementById('detailInteraction').value = tile.interactionType || '';
+  }
   updatePreview();
 }
 
@@ -415,6 +418,10 @@ function applyDetail() {
   tile.data.slows = document.getElementById('detailSlows').checked ? 1 : 0;
   tile.data.damaging = document.getElementById('detailDamaging').checked ? 1 : 0;
   tile.data.isWall = document.getElementById('detailIsWall').checked ? 1 : 0;
+  if (document.getElementById('detailInteraction')) {
+    const v = document.getElementById('detailInteraction').value.trim();
+    tile.interactionType = v.length > 0 ? v : null;
+  }
   selectedTile = tile;
   markDirty('tiles');
   renderTileList(tileSearch.value);
@@ -792,6 +799,12 @@ function showItemDetail(item) {
   document.getElementById('itemClass').value = item.targetClass != null ? item.targetClass : -4;
   document.getElementById('itemFame').value = item.fameBonus || 0;
   document.getElementById('itemConsumable').checked = !!item.consumable;
+  // Forge / stack fields (added with the pixel-forge enchantment system)
+  if (document.getElementById('itemStackable')) document.getElementById('itemStackable').checked = !!item.stackable;
+  if (document.getElementById('itemMaxStack')) document.getElementById('itemMaxStack').value = item.maxStack || 1;
+  if (document.getElementById('itemCategory')) document.getElementById('itemCategory').value = item.category || 'generic';
+  if (document.getElementById('itemForgeStatId')) document.getElementById('itemForgeStatId').value = item.forgeStatId != null ? item.forgeStatId : -1;
+  if (document.getElementById('itemForgeSlotId')) document.getElementById('itemForgeSlotId').value = item.forgeSlotId != null ? item.forgeSlotId : -1;
 
   const s = item.stats || {};
   document.getElementById('statHp').value = s.hp || 0;
@@ -830,6 +843,11 @@ function applyItemDetail() {
   item.targetClass = parseInt(document.getElementById('itemClass').value);
   item.fameBonus = parseInt(document.getElementById('itemFame').value) || 0;
   item.consumable = document.getElementById('itemConsumable').checked;
+  if (document.getElementById('itemStackable')) item.stackable = document.getElementById('itemStackable').checked;
+  if (document.getElementById('itemMaxStack')) item.maxStack = parseInt(document.getElementById('itemMaxStack').value) || 1;
+  if (document.getElementById('itemCategory')) item.category = document.getElementById('itemCategory').value || 'generic';
+  if (document.getElementById('itemForgeStatId')) item.forgeStatId = parseInt(document.getElementById('itemForgeStatId').value);
+  if (document.getElementById('itemForgeSlotId')) item.forgeSlotId = parseInt(document.getElementById('itemForgeSlotId').value);
 
   if (!item.stats) item.stats = {};
   item.stats.hp = parseInt(document.getElementById('statHp').value) || 0;

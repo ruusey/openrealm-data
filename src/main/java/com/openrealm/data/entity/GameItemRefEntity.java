@@ -26,8 +26,10 @@ public class GameItemRefEntity extends TemporalEntity {
 	private Integer itemId;
 	private Integer slotIdx;
 	private String itemUuid;
+	private Integer stackCount;
+	private java.util.List<EnchantmentEntity> enchantments;
 
 	public static GameItemRefEntity from(final int targetIndex, final int itemId) {
-		return GameItemRefEntity.builder().itemUuid(PlayerDataService.randomUuid()).slotIdx(targetIndex).itemId(itemId).build();
+		return GameItemRefEntity.builder().itemUuid(PlayerDataService.randomUuid()).slotIdx(targetIndex).itemId(itemId).stackCount(1).build();
 	}
 }
