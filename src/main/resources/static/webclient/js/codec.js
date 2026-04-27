@@ -411,7 +411,10 @@ export const PacketReaders = {
                  toVault: r.readByte(), toNexus: r.readByte() };
     },
     [PacketId.PLAYER_MOVE](r) {
-        return { entityId: r.readLong(), seq: r.readInt(), dirFlags: r.readByte() };
+        // Wire format: long entityId, int seq, float vx, float vy.
+        // (vx, vy) is a unit vector — (0, 0) = stopped. Replaces the old
+        // 4-bit dirFlags so camera-relative movement can have continuous angles.
+        return { entityId: r.readLong(), seq: r.readInt(), vx: r.readFloat(), vy: r.readFloat() };
     },
     [PacketId.PLAYER_POS_ACK](r) {
         return { seq: r.readInt(), posX: r.readFloat(), posY: r.readFloat() };
@@ -433,9 +436,9 @@ function buildPacket(packetId, writerFn) {
 }
 
 export const PacketWriters = {
-    playerMove(entityId, seq, dirFlags) {
+    playerMove(entityId, seq, vx, vy) {
         return buildPacket(PacketId.PLAYER_MOVE, w => {
-            w.writeLong(entityId); w.writeInt(seq); w.writeByte(dirFlags);
+            w.writeLong(entityId); w.writeInt(seq); w.writeFloat(vx); w.writeFloat(vy);
         });
     },
 

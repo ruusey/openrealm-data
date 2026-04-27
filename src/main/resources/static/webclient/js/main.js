@@ -1549,29 +1549,29 @@ function sampleDirFlags() {
 // Camera rotation speed (radians/sec) — continuous while Q/E held
 const CAM_ROTATE_SPEED = Math.PI; // 180 deg/sec
 
-// Rotate screen-space direction flags to world-space, accounting for camera angle
-function rotateDirectionFlags(flags, angle) {
-    if (flags === 0 || angle === 0) return flags;
+// Convert screen-space cardinal dirFlags into a world-space unit vector,
+// rotated by -cameraAngle so a key press of "north" walks the player toward
+// camera-relative-up regardless of how the camera is rotated.
+//
+// The previous rotateDirectionFlags() snapped to nearest of 8 directions (the
+// 4-bit dirFlags wire format couldn't carry an angle). The new wire format
+// (PlayerMovePacket vx/vy) is continuous, so any camera angle now produces
+// continuous movement direction.
+function screenDirFlagsToWorldVector(flags, cameraAngle) {
+    if (flags === 0) return { vx: 0, vy: 0 };
     let dx = 0, dy = 0;
     if (flags & 0x01) dy -= 1; // up
     if (flags & 0x02) dy += 1; // down
     if (flags & 0x04) dx -= 1; // left
     if (flags & 0x08) dx += 1; // right
-
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const rx = dx * cos - dy * sin;
-    const ry = dx * sin + dy * cos;
-
-    let newFlags = 0;
-    if (ry < -0.38) newFlags |= 0x01; // up
-    if (ry > 0.38) newFlags |= 0x02;  // down
-    if (rx < -0.38) newFlags |= 0x04; // left
-    if (rx > 0.38) newFlags |= 0x08;  // right
-
-    if ((newFlags & 0x01) && (newFlags & 0x02)) newFlags &= ~(0x01 | 0x02);
-    if ((newFlags & 0x04) && (newFlags & 0x08)) newFlags &= ~(0x04 | 0x08);
-    return newFlags;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return { vx: 0, vy: 0 };
+    dx /= len; dy /= len;
+    if (cameraAngle === 0) return { vx: dx, vy: dy };
+    // Rotate screen-space → world-space by -cameraAngle
+    const c = Math.cos(-cameraAngle);
+    const s = Math.sin(-cameraAngle);
+    return { vx: dx * c - dy * s, vy: dx * s + dy * c };
 }
 
 // --- Input Processing ---
@@ -1597,10 +1597,11 @@ function processInput(dt) {
         game.cameraAngle = 0;
     }
 
-    // Sample screen-space direction, then rotate to world-space for server
+    // Sample screen-space direction → unit-vector world-space (vx, vy).
+    // Continuous angles, no 22.5° snap behavior.
     const screenDirFlags = sampleDirFlags();
-    let dirFlags = rotateDirectionFlags(screenDirFlags, -game.cameraAngle);
-    if (game.hasEffect(StatusEffect.PARALYZED)) dirFlags = 0;
+    let { vx, vy } = screenDirFlagsToWorldVector(screenDirFlags, game.cameraAngle);
+    if (game.hasEffect(StatusEffect.PARALYZED)) { vx = 0; vy = 0; }
 
     // Run fixed-timestep simulation ticks (64Hz, matching server exactly)
     simAccumulator += dt * 1000;
@@ -1609,7 +1610,6 @@ function processInput(dt) {
 
     if (!game._pendingInputs) game._pendingInputs = [];
     if (!game._inputSeq) game._inputSeq = 0;
-    let lastSentFlags = game._lastSentDirFlags || -1;
 
     const preTickX = local.pos.x;
     const preTickY = local.pos.y;
@@ -1621,23 +1621,19 @@ function processInput(dt) {
         ticksRan++;
 
         // Predict movement locally using IDENTICAL physics to server
-        game.simulateTick(local, dirFlags);
+        game.simulateTick(local, vx, vy);
 
         // Buffer this input for reconciliation
-        game._pendingInputs.push({
-            seq: game._inputSeq,
-            dirFlags: dirFlags
-        });
+        game._pendingInputs.push({ seq: game._inputSeq, vx, vy });
 
-        // Cap buffer (32 ticks = 500ms — if we have more, something is wrong)
+        // Cap buffer (64 ticks = 1s)
         if (game._pendingInputs.length > 64) {
             game._pendingInputs.shift();
         }
 
-        // Send every tick — 1:1 with server processing. 18 bytes * 64Hz = 1.1KB/s.
-        network.sendPlayerMove(game.playerId, game._inputSeq, dirFlags);
+        // Send every tick — 1:1 with server processing. 21 bytes * 64Hz ≈ 1.3KB/s.
+        network.sendPlayerMove(game.playerId, game._inputSeq, vx, vy);
     }
-    game._lastSentDirFlags = lastSentFlags;
 
     // Interpolation between 64Hz ticks for smooth rendering at any fps.
     // We lerp between the pre-tick and post-tick positions rather than

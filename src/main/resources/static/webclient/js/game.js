@@ -283,41 +283,36 @@ export class GameState {
         return this.effectIds.some(id => id === effectId);
     }
 
-    // Simulate one 64Hz tick of movement for an entity with the given dirFlags.
-    // This MUST produce identical results to the server's movePlayer().
-    // Both use: speed = tilesPerSec * 32 / 64, same collision checks, same diagonal logic.
-    simulateTick(entity, dirFlags) {
+    // Simulate one 64Hz tick of movement for an entity with the given (vx, vy)
+    // unit vector. MUST produce identical results to the server's movePlayer()
+    // / applyMovementTick(). Both: speed = tilesPerSec * 32 / 64; client and
+    // server clamp |v| ≤ 1 then apply spd to each component (so a 45° diagonal
+    // gets the natural √2/2 reduction from the unit vector itself — no separate
+    // diagonal scaling like the dirFlags era needed).
+    simulateTick(entity, vx, vy) {
         // PARALYZED: server returns early, zero movement, no collision checks.
-        // Match exactly: don't run any physics.
         if (this.hasEffect(StatusEffect.PARALYZED)) return;
 
-        // STASIS (15): doesn't affect player movement (only enemy invulnerability)
-        // STUNNED (3): doesn't affect movement (only blocks shooting)
-        // INVINCIBLE (6): doesn't affect movement
-        // DAZED (11): doesn't affect movement speed (only attack speed/dexterity)
-
-        const up    = !!(dirFlags & 0x01);
-        const down  = !!(dirFlags & 0x02);
-        const left  = !!(dirFlags & 0x04);
-        const right = !!(dirFlags & 0x08);
+        // Defensively clamp magnitude to 1 (matches server)
+        const mag = Math.sqrt(vx * vx + vy * vy);
+        if (mag < 0.001) return; // not moving
+        if (mag > 1.0) { vx /= mag; vy /= mag; }
 
         const computed = this.getComputedStats();
         const spdStat = computed ? computed.spd : 10;
         let tilesPerSec = 4.0 + 5.6 * (spdStat / 75.0);
-        if (this.hasEffect(StatusEffect.SPEEDY)) tilesPerSec *= 1.5; // SPEEDY: 1.5x movement speed
-        if (this.hasEffect(StatusEffect.SLOWED)) tilesPerSec *= 0.5; // SLOWED: 0.5x movement speed
-        // BERSERK (19): doesn't affect movement speed (only dexterity/attack speed)
-        // ARMORED (18): doesn't affect movement speed (only defense)
-        let spd = tilesPerSec * 32.0 / 64.0; // pixels per tick — ALWAYS /64
+        if (this.hasEffect(StatusEffect.SPEEDY)) tilesPerSec *= 1.5;
+        if (this.hasEffect(StatusEffect.SLOWED)) tilesPerSec *= 0.5;
+        const spd = tilesPerSec * 32.0 / 64.0;
 
-        const movingX = left || right;
-        const movingY = up || down;
-        if (movingX && movingY) {
-            spd = spd * Math.sqrt(2) / 2.0;
-        }
+        let dx = vx * spd;
+        let dy = vy * spd;
 
-        let dx = right ? spd : left ? -spd : 0;
-        let dy = down ? spd : up ? -spd : 0;
+        // Update entity velocity so the renderer's animation picker (which
+        // chooses walk_front/walk_back/walk_side from sign(dx)/sign(dy)) reacts
+        // immediately rather than waiting for the next server LoadPacket.
+        entity.dx = dx;
+        entity.dy = dy;
 
         if (dx === 0 && dy === 0) return;
 
@@ -605,7 +600,7 @@ export class GameState {
 
         // 4. Replay all unacknowledged inputs using the same simulateTick()
         for (const inp of this._pendingInputs) {
-            this.simulateTick(local, inp.dirFlags);
+            this.simulateTick(local, inp.vx, inp.vy);
         }
 
         // 5. Compare replayed position with where client currently is
