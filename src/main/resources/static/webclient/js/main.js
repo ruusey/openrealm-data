@@ -823,6 +823,7 @@ function doRealmTransition(portal, isVault) {
 
     // Clear local state (matches Java Realm.loadMap)
     game.prepareRealmTransition();
+    showTransitionScreen();
 
     // Reset renderer tile debug flag so new tiles get logged
     if (renderer) {
@@ -953,6 +954,8 @@ function initOptionsMenu() {
         v => s.graphics.showDamageNumbers = v);
     bindCheckbox('opt-show-player-names', () => s.graphics.showPlayerNames,
         v => s.graphics.showPlayerNames = v);
+    bindCheckbox('opt-show-transition', () => s.graphics.showTransitionScreen,
+        v => s.graphics.showTransitionScreen = v);
     bindSelect('opt-render-quality', () => s.graphics.renderQuality,
         v => s.graphics.renderQuality = v);
     bindSelect('opt-max-bullets', () => String(s.graphics.maxBulletsOnScreen),
@@ -1016,7 +1019,9 @@ const KEYBIND_ROWS = [
     { action: 'chat',      label: 'Open Chat',       locked: true  },
     { action: 'autofire',  label: 'Toggle Autofire', locked: true  },
     { action: 'inventory', label: 'Open Inventory',  locked: true  },
-    { action: 'menu',      label: 'Open Menu',       locked: true  }
+    { action: 'menu',      label: 'Open Menu',       locked: true  },
+    { action: 'hpPotion',  label: 'Use HP Potion',   locked: false },
+    { action: 'mpPotion',  label: 'Use MP Potion',   locked: false }
 ];
 
 function formatKeyCode(code) {
@@ -1339,6 +1344,15 @@ function setupNetworkHandlers() {
 
     network.on(PacketId.TEXT, (data) => {
         game.handleText(data);
+        // Capture zone name and difficulty during realm transitions
+        if (game.transitionActive && data.from === 'SYSTEM') {
+            if (!game.transitionZoneName && !data.message.startsWith('Difficulty:') && !data.message.startsWith('Enemies:')) {
+                game.transitionZoneName = data.message;
+            } else if (data.message.startsWith('Difficulty:')) {
+                const diff = parseFloat(data.message.replace('Difficulty: ', ''));
+                if (!isNaN(diff)) game.transitionDifficulty = diff;
+            }
+        }
         // Look up sender's chatRole from player map for name coloring
         const senderRole = game.getPlayerRoleByName(data.from);
         addChatMessage(data.from, data.message, senderRole);
@@ -1727,6 +1741,7 @@ function processInput(dt) {
         input.keys['KeyR'] = false;
         network.sendUsePortal(-1n, game.realmId || 0n, game.playerId, -1, 1);
         game.prepareRealmTransition();
+        showTransitionScreen();
     }
 
     // F2 = Use nearest portal
@@ -1763,21 +1778,27 @@ function processInput(dt) {
         }
     }
 
-    // HP Potion hotkey (F)
-    if (input.isKeyDown('KeyF') && !input.chatMode && !input.menuOpen) {
-        if (!updatePotionUI._hpCooldown || Date.now() - updatePotionUI._hpCooldown > 500) {
-            updatePotionUI._hpCooldown = Date.now();
-            if (game.hpPotions > 0) {
-                network.sendMoveItem(game.playerId, -1, 28, false, true);
+    // HP Potion hotkey (rebindable, default Z)
+    {
+        const hpKey = (game.settings?.controls?.bindings?.hpPotion) || 'KeyZ';
+        if (input.isKeyDown(hpKey) && !input.chatMode && !input.menuOpen) {
+            if (!updatePotionUI._hpCooldown || Date.now() - updatePotionUI._hpCooldown > 500) {
+                updatePotionUI._hpCooldown = Date.now();
+                if (game.hpPotions > 0) {
+                    network.sendMoveItem(game.playerId, -1, 28, false, true);
+                }
             }
         }
     }
-    // MP Potion hotkey (V)
-    if (input.isKeyDown('KeyV') && !input.chatMode && !input.menuOpen) {
-        if (!updatePotionUI._mpCooldown || Date.now() - updatePotionUI._mpCooldown > 500) {
-            updatePotionUI._mpCooldown = Date.now();
-            if (game.mpPotions > 0) {
-                network.sendMoveItem(game.playerId, -1, 29, false, true);
+    // MP Potion hotkey (rebindable, default X)
+    {
+        const mpKey = (game.settings?.controls?.bindings?.mpPotion) || 'KeyX';
+        if (input.isKeyDown(mpKey) && !input.chatMode && !input.menuOpen) {
+            if (!updatePotionUI._mpCooldown || Date.now() - updatePotionUI._mpCooldown > 500) {
+                updatePotionUI._mpCooldown = Date.now();
+                if (game.mpPotions > 0) {
+                    network.sendMoveItem(game.playerId, -1, 29, false, true);
+                }
             }
         }
     }
@@ -1926,6 +1947,7 @@ function updateHUD() {
     // Inventory
     updateInventoryUI();
     updatePotionUI();
+    updateTransitionScreen();
 
     // Trade buttons
     const tradeBtns = document.getElementById('trade-buttons');
@@ -2079,6 +2101,117 @@ function updateInventoryUI() {
     updateGroundLootUI();
 }
 
+// ---- Realm Transition Screen ----
+const TRANSITION_DURATION_MS = 2000;
+const TRANSITION_FADE_MS = 400;
+let _transitionAnimFrame = 0;
+let _transitionAnimTimer = 0;
+let _transitionSpriteFrames = null;
+
+function showTransitionScreen() {
+    if (!game.settings?.graphics?.showTransitionScreen) return;
+    const el = document.getElementById('realm-transition');
+    if (!el) return;
+    el.style.display = 'flex';
+    el.classList.remove('fade-out');
+    document.getElementById('transition-zone').textContent = '';
+    document.getElementById('transition-skulls').innerHTML = '';
+    document.getElementById('transition-diff-label').textContent = '';
+    _transitionAnimFrame = 0;
+    _transitionAnimTimer = 0;
+    _transitionSpriteFrames = null;
+    // Clear sprite canvas
+    const canvas = document.getElementById('transition-player-sprite');
+    if (canvas) canvas.getContext('2d').clearRect(0, 0, 64, 64);
+}
+
+function updateTransitionScreen() {
+    if (!game.transitionActive) return;
+    const el = document.getElementById('realm-transition');
+    if (!el || el.style.display === 'none') return;
+
+    const elapsed = Date.now() - game.transitionStartTime;
+    const dataReady = !game.awaitingRealmTransition;
+
+    // Update zone name when available
+    const zoneEl = document.getElementById('transition-zone');
+    if (zoneEl && game.transitionZoneName && zoneEl.textContent !== game.transitionZoneName) {
+        zoneEl.textContent = game.transitionZoneName;
+    }
+
+    // Update difficulty skulls when available
+    const skullsEl = document.getElementById('transition-skulls');
+    const diffLabel = document.getElementById('transition-diff-label');
+    if (skullsEl && game.transitionDifficulty > 0 && !skullsEl.dataset.set) {
+        const diff = Math.round(game.transitionDifficulty);
+        const maxSkulls = 7;
+        let html = '';
+        for (let i = 1; i <= maxSkulls; i++) {
+            html += i <= diff
+                ? '<span class="skull-filled">\u2620</span>'
+                : '<span class="skull-empty">\u2620</span>';
+        }
+        skullsEl.innerHTML = html;
+        skullsEl.dataset.set = '1';
+        if (diffLabel) diffLabel.textContent = `Difficulty ${game.transitionDifficulty.toFixed(1)}`;
+    }
+
+    // Animate player walking sprite
+    renderTransitionSprite();
+
+    // Dismiss: wait for both minimum duration AND data loaded
+    if (elapsed >= TRANSITION_DURATION_MS && dataReady) {
+        el.classList.add('fade-out');
+        setTimeout(() => {
+            el.style.display = 'none';
+            el.classList.remove('fade-out');
+            game.transitionActive = false;
+            // Reset skulls dataset for next transition
+            if (skullsEl) delete skullsEl.dataset.set;
+        }, TRANSITION_FADE_MS);
+        game.transitionActive = false; // prevent re-entry
+    }
+}
+
+function renderTransitionSprite() {
+    const canvas = document.getElementById('transition-player-sprite');
+    if (!canvas || !renderer) return;
+    const ctx = canvas.getContext('2d');
+
+    // Load animation frames on first call
+    if (!_transitionSpriteFrames) {
+        const animKey = `player:${game.transitionClassId}`;
+        const animDef = game.animations?.[animKey];
+        if (!animDef) return;
+        const walkAnim = animDef.animations['walk_front'] || animDef.animations['walk_side'];
+        if (!walkAnim) return;
+        _transitionSpriteFrames = walkAnim.frames.map(f => {
+            const url = renderer.getSpriteDataUrl(
+                animDef.spriteKey.replace('.png', '') + '.png',
+                f.col, f.row, animDef.spriteSize || 8, animDef.spriteHeight || 0);
+            return url;
+        }).filter(Boolean);
+        if (_transitionSpriteFrames.length === 0) { _transitionSpriteFrames = null; return; }
+    }
+
+    // Advance animation (swap frames every 300ms)
+    _transitionAnimTimer++;
+    if (_transitionAnimTimer >= 18) { // ~300ms at 60fps
+        _transitionAnimTimer = 0;
+        _transitionAnimFrame = (_transitionAnimFrame + 1) % _transitionSpriteFrames.length;
+    }
+
+    const url = _transitionSpriteFrames[_transitionAnimFrame];
+    if (!url) return;
+
+    // Draw sprite centered on canvas
+    const img = new Image();
+    img.src = url;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, 64, 64);
+    ctx.drawImage(img, 0, 0, 64, 64);
+}
+
 // Consumable potion display
 let _lastPotionKey = '';
 function updatePotionUI() {
@@ -2090,6 +2223,14 @@ function updatePotionUI() {
     const mpCount = document.getElementById('mp-potion-count');
     if (hpCount) hpCount.textContent = game.hpPotions;
     if (mpCount) mpCount.textContent = game.mpPotions;
+
+    // Update hotkey labels from rebindable settings
+    const hpKeyEl = document.getElementById('hp-potion-key');
+    const mpKeyEl = document.getElementById('mp-potion-key');
+    const hpBind = (game.settings?.controls?.bindings?.hpPotion) || 'KeyZ';
+    const mpBind = (game.settings?.controls?.bindings?.mpPotion) || 'KeyX';
+    if (hpKeyEl) hpKeyEl.textContent = hpBind.replace('Key', '').replace('Digit', '');
+    if (mpKeyEl) mpKeyEl.textContent = mpBind.replace('Key', '').replace('Digit', '');
 
     // Load potion icons if not yet loaded
     const hpIcon = document.getElementById('hp-potion-icon');
@@ -2110,13 +2251,13 @@ function updatePotionUI() {
     }
 }
 
-// Click to consume potions
-document.getElementById('hp-potion-slot')?.addEventListener('click', () => {
+// Double-click to consume potions
+document.getElementById('hp-potion-slot')?.addEventListener('dblclick', () => {
     if (game.hpPotions > 0) {
         network.sendMoveItem(game.playerId, -1, 28, false, true);
     }
 });
-document.getElementById('mp-potion-slot')?.addEventListener('click', () => {
+document.getElementById('mp-potion-slot')?.addEventListener('dblclick', () => {
     if (game.mpPotions > 0) {
         network.sendMoveItem(game.playerId, -1, 29, false, true);
     }

@@ -190,18 +190,30 @@
                     <div class="potion-icon" id="hp-potion-icon"></div>
                     <span class="potion-count" id="hp-potion-count">0</span>
                     <span class="potion-label">HP</span>
-                    <span class="potion-key">F</span>
+                    <span class="potion-key" id="hp-potion-key">Z</span>
                 </div>
                 <div id="mp-potion-slot" class="potion-slot">
                     <div class="potion-icon" id="mp-potion-icon"></div>
                     <span class="potion-count" id="mp-potion-count">0</span>
                     <span class="potion-label">MP</span>
-                    <span class="potion-key">V</span>
+                    <span class="potion-key" id="mp-potion-key">X</span>
                 </div>
             </div>
             <div id="nearby-section">
                 <div id="nearby-label" style="font-size:10px;color:#887868;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Players Nearby</div>
                 <div id="nearby-players"></div>
+            </div>
+        </div>
+        <!-- Realm Transition Overlay -->
+        <div id="realm-transition" style="display:none">
+            <div id="transition-content">
+                <div id="transition-title">OpenRealm</div>
+                <div id="transition-zone"></div>
+                <canvas id="transition-player-sprite" width="64" height="64"></canvas>
+                <div id="transition-difficulty">
+                    <div id="transition-skulls"></div>
+                    <div id="transition-diff-label"></div>
+                </div>
             </div>
         </div>
         <!-- Chat -->
@@ -260,6 +272,10 @@
                     <label class="options-row">
                         <input type="checkbox" id="opt-show-player-names">
                         <span>Show player names above heads</span>
+                    </label>
+                    <label class="options-row">
+                        <input type="checkbox" id="opt-show-transition">
+                        <span>Show realm transition screen</span>
                     </label>
                     <label class="options-row">
                         <span>Render quality <em class="options-hint">(coming soon)</em></span>

@@ -30,7 +30,8 @@ export const DEFAULT_SETTINGS = {
         showDamageNumbers: true,        // Stub
         showPlayerNames: true,          // Stub
         renderQuality: 'high',          // Stub
-        maxBulletsOnScreen: 0           // Stub (0 = unlimited)
+        maxBulletsOnScreen: 0,          // Stub (0 = unlimited)
+        showTransitionScreen: true
     },
     controls: {
         // Empty overrides = use hardcoded defaults. Movement keys are wired
@@ -45,7 +46,9 @@ export const DEFAULT_SETTINGS = {
             chat: 'Enter',
             autofire: 'KeyI',
             inventory: 'KeyR',
-            menu: 'Escape'
+            menu: 'Escape',
+            hpPotion: 'KeyZ',
+            mpPotion: 'KeyX'
         }
     },
     mobile: {
@@ -134,6 +137,13 @@ export class GameState {
         // Consumable potion storage
         this.hpPotions = 0;
         this.mpPotions = 0;
+
+        // Realm transition screen state
+        this.transitionActive = false;
+        this.transitionStartTime = 0;
+        this.transitionZoneName = '';
+        this.transitionDifficulty = 0;
+        this.transitionClassId = 0;
 
         // Camera
         this.cameraX = 0;
@@ -240,6 +250,12 @@ export class GameState {
         this.mapTiles = null;
         this.mapWidth = 0;
         this.mapHeight = 0;
+        // Capture transition info for loading screen
+        this.transitionClassId = this.classId || 0;
+        this.transitionActive = true;
+        this.transitionStartTime = Date.now();
+        this.transitionZoneName = '';
+        this.transitionDifficulty = 0;
         this.awaitingRealmTransition = true;
     }
 

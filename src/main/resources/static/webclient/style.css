@@ -1175,3 +1175,80 @@ button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
 .lb-stat-val { color: #b8b0a0; font-size: 11px; font-weight: bold; }
 .lb-stat-hp { color: #e06060; }
 .lb-stat-mp { color: #6090e0; }
+
+/* Realm transition overlay */
+#realm-transition {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #000;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transition: opacity 0.4s ease-out;
+}
+
+#realm-transition.fade-out {
+    opacity: 0;
+}
+
+#transition-content {
+    text-align: center;
+    color: #e8d8c8;
+    font-family: monospace;
+}
+
+#transition-title {
+    font-size: 28px;
+    font-weight: bold;
+    color: #c8a86e;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 30px;
+    text-shadow: 0 0 20px rgba(200, 168, 110, 0.5);
+}
+
+#transition-zone {
+    font-size: 22px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 20px;
+    min-height: 30px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+#transition-player-sprite {
+    image-rendering: pixelated;
+    width: 64px;
+    height: 64px;
+    margin: 10px auto;
+    display: block;
+}
+
+#transition-difficulty {
+    margin-top: 20px;
+}
+
+#transition-skulls {
+    font-size: 20px;
+    letter-spacing: 4px;
+    min-height: 28px;
+}
+
+#transition-skulls .skull-filled {
+    color: #c04040;
+    text-shadow: 0 0 6px rgba(192, 64, 64, 0.6);
+}
+
+#transition-skulls .skull-empty {
+    color: #333;
+}
+
+#transition-diff-label {
+    font-size: 11px;
+    color: #887868;
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
