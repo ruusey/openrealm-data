@@ -261,12 +261,12 @@
 		"size": 32,
 		"attackId": 19,
 		"xp": 150,
-		"health": 130,
-		"maxSpeed": 1.1,
+		"health": 100,
+		"maxSpeed": 0.9,
 		"chaseRange": 420,
 		"attackRange": 240,
 		"stats": {
-			"hp": 130,
+			"hp": 100,
 			"def": 2,
 			"dex": 15,
 			"mp": 0,
@@ -287,12 +287,12 @@
 		"size": 32,
 		"attackId": 20,
 		"xp": 135,
-		"health": 100,
-		"maxSpeed": 1.4,
+		"health": 80,
+		"maxSpeed": 0.9,
 		"chaseRange": 390,
 		"attackRange": 210,
 		"stats": {
-			"hp": 100,
+			"hp": 80,
 			"def": 1,
 			"dex": 1
 		}
@@ -568,7 +568,7 @@
 		"attackId": 228,
 		"xp": 180,
 		"health": 90,
-		"maxSpeed": 1.4,
+		"maxSpeed": 1.0,
 		"chaseRange": 390,
 		"attackRange": 50,
 		"stats": {
@@ -594,8 +594,8 @@
 						"projectileGroupId": 228,
 						"cooldownMs": 600,
 						"aimMode": "PLAYER",
-						"burstCount": 3,
-						"burstDelayMs": 150
+						"burstCount": 2,
+						"burstDelayMs": 250
 					}
 				]
 			}
@@ -674,14 +674,14 @@
 		"size": 32,
 		"attackId": 35,
 		"xp": 225,
-		"health": 300,
-		"maxSpeed": 1.55,
+		"health": 150,
+		"maxSpeed": 1.0,
 		"chaseRange": 300,
 		"attackRange": 200,
 		"stats": {
-			"hp": 300,
+			"hp": 150,
 			"def": 2,
-			"dex": 8,
+			"dex": 5,
 			"mp": 0,
 			"att": 0,
 			"spd": 0,
@@ -700,12 +700,12 @@
 		"size": 32,
 		"attackId": 36,
 		"xp": 300,
-		"health": 250,
-		"maxSpeed": 1.45,
+		"health": 130,
+		"maxSpeed": 1.0,
 		"chaseRange": 360,
 		"attackRange": 250,
 		"stats": {
-			"hp": 250,
+			"hp": 130,
 			"def": 1,
 			"dex": 5,
 			"mp": 0,
@@ -1334,14 +1334,14 @@
 		"size": 32,
 		"attackId": 55,
 		"xp": 280,
-		"health": 280,
-		"maxSpeed": 1.8,
+		"health": 120,
+		"maxSpeed": 1.1,
 		"chaseRange": 330,
 		"attackRange": 150,
 		"stats": {
-			"hp": 280,
-			"def": 4,
-			"dex": 18,
+			"hp": 120,
+			"def": 1,
+			"dex": 6,
 			"mp": 0,
 			"att": 0,
 			"spd": 0,
@@ -1992,8 +1992,8 @@
 		"size": 32,
 		"attackId": 51,
 		"xp": 150,
-		"health": 120,
-		"maxSpeed": 1.5,
+		"health": 70,
+		"maxSpeed": 0.9,
 		"chaseRange": 270,
 		"attackRange": 150,
 		"stats": {
@@ -2268,8 +2268,8 @@
 				"attacks": [
 					{
 						"projectileGroupId": 72,
-						"cooldownMs": 400,
-						"burstCount": 2,
+						"cooldownMs": 800,
+						"burstCount": 1,
 						"burstDelayMs": 80
 					}
 				]

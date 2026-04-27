@@ -131,6 +131,10 @@ export class GameState {
         this.effectIds = [];
         this.effectTimes = [];
 
+        // Consumable potion storage
+        this.hpPotions = 0;
+        this.mpPotions = 0;
+
         // Camera
         this.cameraX = 0;
         this.cameraY = 0;
@@ -656,6 +660,8 @@ export class GameState {
                 console.log(`[INV] First UpdatePacket inventory: len=${packet.inventory?.length}, ids=[${ids.join(',')}]`);
             }
             this.inventory = packet.inventory;
+            if (packet.hpPotions !== undefined) this.hpPotions = packet.hpPotions;
+            if (packet.mpPotions !== undefined) this.mpPotions = packet.mpPotions;
             this.playerName = packet.playerName;
         }
         const player = this.players.get(packet.playerId);

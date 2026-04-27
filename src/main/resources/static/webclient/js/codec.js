@@ -277,7 +277,8 @@ export const PacketReaders = {
         return {
             playerId: r.readLong(), playerName: r.readString(), stats: NetStats.read(r),
             health: r.readInt(), mana: r.readInt(), experience: r.readLong(),
-            inventory: r.readArray(rr => NetGameItem.read(rr))
+            inventory: r.readArray(rr => NetGameItem.read(rr)),
+            hpPotions: r.readByte(), mpPotions: r.readByte()
         };
     },
     [PacketId.PLAYER_STATE](r) {

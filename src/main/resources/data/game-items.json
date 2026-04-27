@@ -5463,5 +5463,53 @@
 			"vit": 0,
 			"wis": 0
 		}
+	},
+	{
+		"itemId": 296,
+		"row": 3,
+		"col": 2,
+		"spriteKey": "lofiObj2.png",
+		"spriteSize": 8,
+		"name": "Health Potion",
+		"description": "Restores 100 HP. Stored separately (max 6). Press F to use.",
+		"consumable": true,
+		"tier": -1,
+		"targetSlot": -1,
+		"targetClass": -4,
+		"fameBonus": 0,
+		"stats": {
+			"hp": 0,
+			"mp": 0,
+			"def": 0,
+			"att": 0,
+			"spd": 0,
+			"dex": 0,
+			"vit": 0,
+			"wis": 0
+		}
+	},
+	{
+		"itemId": 297,
+		"row": 3,
+		"col": 3,
+		"spriteKey": "lofiObj2.png",
+		"spriteSize": 8,
+		"name": "Mana Potion",
+		"description": "Restores 100 MP. Stored separately (max 6). Press V to use.",
+		"consumable": true,
+		"tier": -1,
+		"targetSlot": -1,
+		"targetClass": -4,
+		"fameBonus": 0,
+		"stats": {
+			"hp": 0,
+			"mp": 0,
+			"def": 0,
+			"att": 0,
+			"spd": 0,
+			"dex": 0,
+			"vit": 0,
+			"wis": 0
+		}
 	}
 ]

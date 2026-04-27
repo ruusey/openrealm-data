@@ -1730,9 +1730,8 @@ function processInput(dt) {
     }
 
     // F2 = Use nearest portal
-    if (input.isKeyDown('F2') || input.isKeyDown('KeyF') || input.isKeyDown('Space')) {
+    if (input.isKeyDown('F2') || input.isKeyDown('Space')) {
         input.keys['F2'] = false;
-        input.keys['KeyF'] = false;
         input.keys['Space'] = false;
         const local = game.getLocalPlayer();
         if (local) {
@@ -1760,6 +1759,25 @@ function processInput(dt) {
             if (item && item.itemId >= 0 && item.consumable) {
                 network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
                 lastInvKey = '';
+            }
+        }
+    }
+
+    // HP Potion hotkey (F)
+    if (input.isKeyDown('KeyF') && !input.chatMode && !input.menuOpen) {
+        if (!updatePotionUI._hpCooldown || Date.now() - updatePotionUI._hpCooldown > 500) {
+            updatePotionUI._hpCooldown = Date.now();
+            if (game.hpPotions > 0) {
+                network.sendMoveItem(game.playerId, -1, 28, false, true);
+            }
+        }
+    }
+    // MP Potion hotkey (V)
+    if (input.isKeyDown('KeyV') && !input.chatMode && !input.menuOpen) {
+        if (!updatePotionUI._mpCooldown || Date.now() - updatePotionUI._mpCooldown > 500) {
+            updatePotionUI._mpCooldown = Date.now();
+            if (game.mpPotions > 0) {
+                network.sendMoveItem(game.playerId, -1, 29, false, true);
             }
         }
     }
@@ -1907,6 +1925,7 @@ function updateHUD() {
 
     // Inventory
     updateInventoryUI();
+    updatePotionUI();
 
     // Trade buttons
     const tradeBtns = document.getElementById('trade-buttons');
@@ -2059,6 +2078,49 @@ function updateInventoryUI() {
 
     updateGroundLootUI();
 }
+
+// Consumable potion display
+let _lastPotionKey = '';
+function updatePotionUI() {
+    const key = `${game.hpPotions}:${game.mpPotions}`;
+    if (key === _lastPotionKey) return;
+    _lastPotionKey = key;
+
+    const hpCount = document.getElementById('hp-potion-count');
+    const mpCount = document.getElementById('mp-potion-count');
+    if (hpCount) hpCount.textContent = game.hpPotions;
+    if (mpCount) mpCount.textContent = game.mpPotions;
+
+    // Load potion icons if not yet loaded
+    const hpIcon = document.getElementById('hp-potion-icon');
+    const mpIcon = document.getElementById('mp-potion-icon');
+    if (hpIcon && !hpIcon.dataset.loaded && renderer) {
+        const url = renderer.getSpriteDataUrl('lofiObj2.png', 2, 3, 8, 0);
+        if (url) {
+            hpIcon.innerHTML = `<img src="${url}">`;
+            hpIcon.dataset.loaded = '1';
+        }
+    }
+    if (mpIcon && !mpIcon.dataset.loaded && renderer) {
+        const url = renderer.getSpriteDataUrl('lofiObj2.png', 3, 3, 8, 0);
+        if (url) {
+            mpIcon.innerHTML = `<img src="${url}">`;
+            mpIcon.dataset.loaded = '1';
+        }
+    }
+}
+
+// Click to consume potions
+document.getElementById('hp-potion-slot')?.addEventListener('click', () => {
+    if (game.hpPotions > 0) {
+        network.sendMoveItem(game.playerId, -1, 28, false, true);
+    }
+});
+document.getElementById('mp-potion-slot')?.addEventListener('click', () => {
+    if (game.mpPotions > 0) {
+        network.sendMoveItem(game.playerId, -1, 29, false, true);
+    }
+});
 
 // Inventory bag tab switching
 document.querySelectorAll('#inv-tabs .inv-tab').forEach(tab => {
