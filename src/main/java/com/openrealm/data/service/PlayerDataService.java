@@ -27,8 +27,10 @@ import com.openrealm.data.dto.CharacterDto;
 import com.openrealm.data.dto.CharacterStatsDto;
 import com.openrealm.data.dto.LeaderboardEntryDto;
 import com.openrealm.data.dto.ChestDto;
+import com.openrealm.data.dto.EnchantmentDto;
 import com.openrealm.data.dto.GameItemRefDto;
 import com.openrealm.data.dto.PlayerAccountDto;
+import com.openrealm.data.entity.EnchantmentEntity;
 import com.openrealm.data.entity.CharacterEntity;
 import com.openrealm.data.entity.CharacterStatsEntity;
 import com.openrealm.data.entity.ChestEntity;
@@ -110,18 +112,39 @@ public class PlayerDataService {
 
         character.removeItems();
 
+        int mapped = 0, failed = 0;
         for (GameItemRefDto item : newData.getItems()) {
             if (item == null) {
                 continue;
             }
-            GameItemRefEntity itemEntity = this.mapper.map(item, GameItemRefEntity.class);
-            character.addItem(itemEntity);
+            try {
+                final GameItemRefEntity itemEntity = toItemEntity(item);
+                character.addItem(itemEntity);
+                mapped++;
+            } catch (Exception e) {
+                failed++;
+                PlayerDataService.log.error(
+                        "[saveCharacterStats] FAILED to map item itemId={} slot={} uuid={} (skipping). Reason: {}",
+                        item.getItemId(), item.getSlotIdx(), item.getItemUuid(), e.getMessage(), e);
+            }
         }
+        PlayerDataService.log.debug("[saveCharacterStats] character {} mapped {} items ({} failed)",
+                characterUuid, mapped, failed);
 
         ownerAccount = this.playerAccountRepository.save(ownerAccount);
         PlayerDataService.log.debug("Successfully saved character stats for character {} in {}ms",
                 character.getCharacterUuid(), (Instant.now().toEpochMilli() - start));
-        return this.mapper.map(character, CharacterDto.class);
+        final CharacterDto out = this.mapper.map(character, CharacterDto.class);
+        // Re-attach items explicitly so the response has stackCount + enchantments.
+        if (character.getItems() != null) {
+            final List<GameItemRefDto> rebuilt = new ArrayList<>(character.getItems().size());
+            for (final GameItemRefEntity ie : character.getItems()) {
+                final GameItemRefDto id = toItemDto(ie);
+                if (id != null) rebuilt.add(id);
+            }
+            out.setItems(rebuilt);
+        }
+        return out;
     }
     
     public List<LeaderboardEntryDto> getTopCharacters(int count) {
@@ -295,8 +318,42 @@ public class PlayerDataService {
 
     public PlayerAccountDto saveAccount(final PlayerAccountDto dto) {
         PlayerAccountEntity entity = this.mapper.map(dto, PlayerAccountEntity.class);
+        // ModelMapper drops nested generic fields (stackCount, enchantments) on
+        // GameItemRef. Rebuild the items lists from the DTO so vault & character
+        // items round-trip with their stack and enchantment data intact.
+        rebuildItemEntitiesFromDto(dto, entity);
         entity = this.playerAccountRepository.save(entity);
-        return this.mapper.map(entity, PlayerAccountDto.class);
+        final PlayerAccountDto out = this.mapper.map(entity, PlayerAccountDto.class);
+        rebuildItemListsExplicitly(entity, out);
+        return out;
+    }
+
+    private static void rebuildItemEntitiesFromDto(final PlayerAccountDto src, final PlayerAccountEntity dst) {
+        if (src == null || dst == null) return;
+        if (src.getCharacters() != null && dst.getCharacters() != null) {
+            for (int i = 0; i < src.getCharacters().size() && i < dst.getCharacters().size(); i++) {
+                final CharacterDto cd = src.getCharacters().get(i);
+                final CharacterEntity ce = dst.getCharacters().get(i);
+                if (cd == null || ce == null || cd.getItems() == null) continue;
+                ce.removeItems();
+                for (final GameItemRefDto id : cd.getItems()) {
+                    if (id == null) continue;
+                    ce.addItem(toItemEntity(id));
+                }
+            }
+        }
+        if (src.getPlayerVault() != null && dst.getPlayerVault() != null) {
+            for (int i = 0; i < src.getPlayerVault().size() && i < dst.getPlayerVault().size(); i++) {
+                final ChestDto cd = src.getPlayerVault().get(i);
+                final ChestEntity ce = dst.getPlayerVault().get(i);
+                if (cd == null || ce == null || cd.getItems() == null) continue;
+                ce.getItems().clear();
+                for (final GameItemRefDto id : cd.getItems()) {
+                    if (id == null) continue;
+                    ce.addItem(toItemEntity(id));
+                }
+            }
+        }
     }
 
     public PlayerAccountDto createInitialAccount(final String accountUuid, final String email, final String accountName,
@@ -442,12 +499,96 @@ public class PlayerDataService {
         if (entity != null) {
             PlayerDataService.log.debug("Fetched account by UUID {} in {}ms", accountUuid,
                     (Instant.now().toEpochMilli() - start));
-            return this.mapper.map(entity, PlayerAccountDto.class);
+            final PlayerAccountDto dto = this.mapper.map(entity, PlayerAccountDto.class);
+            // ModelMapper can silently drop nested generic-list fields (notably
+            // GameItemRefDto.enchantments). Rebuild item lists explicitly so the
+            // game server always receives stackCount + enchantments verbatim.
+            rebuildItemListsExplicitly(entity, dto);
+            return dto;
         }
         throw new Exception("PlayerAccount with account UUID " + accountUuid + " not found");
     }
 
+    /** Replace each character/chest's items with explicit field-level copies of the entity items. */
+    private static void rebuildItemListsExplicitly(final PlayerAccountEntity src, final PlayerAccountDto dst) {
+        if (src == null || dst == null) return;
+        if (src.getCharacters() != null && dst.getCharacters() != null) {
+            for (int i = 0; i < src.getCharacters().size() && i < dst.getCharacters().size(); i++) {
+                final CharacterEntity ce = src.getCharacters().get(i);
+                final CharacterDto cd = dst.getCharacters().get(i);
+                if (ce != null && cd != null && ce.getItems() != null) {
+                    final List<GameItemRefDto> rebuilt = new ArrayList<>(ce.getItems().size());
+                    for (final GameItemRefEntity ie : ce.getItems()) {
+                        final GameItemRefDto id = toItemDto(ie);
+                        if (id != null) rebuilt.add(id);
+                    }
+                    cd.setItems(rebuilt);
+                }
+            }
+        }
+        if (src.getPlayerVault() != null && dst.getPlayerVault() != null) {
+            for (int i = 0; i < src.getPlayerVault().size() && i < dst.getPlayerVault().size(); i++) {
+                final ChestEntity ce = src.getPlayerVault().get(i);
+                final ChestDto cd = dst.getPlayerVault().get(i);
+                if (ce != null && cd != null && ce.getItems() != null) {
+                    final java.util.Set<GameItemRefDto> rebuilt = new java.util.HashSet<>();
+                    for (final GameItemRefEntity ie : ce.getItems()) {
+                        final GameItemRefDto id = toItemDto(ie);
+                        if (id != null) rebuilt.add(id);
+                    }
+                    cd.setItems(rebuilt);
+                }
+            }
+        }
+    }
+
     public static String randomUuid() {
         return UUID.randomUUID().toString();
+    }
+
+    /**
+     * Explicit DTO -> Entity copy for an inventory item. Avoids ModelMapper's
+     * silent-failure mode on the new {@link EnchantmentDto} list. If anything
+     * goes wrong with enchantments specifically, we still produce a valid item
+     * entity (without enchantments) so the player doesn't lose the item itself.
+     */
+    private static GameItemRefEntity toItemEntity(final GameItemRefDto dto) {
+        final GameItemRefEntity entity = new GameItemRefEntity();
+        entity.setGameItemRefId(dto.getGameItemRefId());
+        entity.setItemId(dto.getItemId());
+        entity.setSlotIdx(dto.getSlotIdx());
+        entity.setItemUuid(dto.getItemUuid());
+        entity.setStackCount(dto.getStackCount() != null ? dto.getStackCount() : Integer.valueOf(1));
+        if (dto.getEnchantments() != null && !dto.getEnchantments().isEmpty()) {
+            final java.util.List<EnchantmentEntity> ench = new ArrayList<>(dto.getEnchantments().size());
+            for (final EnchantmentDto e : dto.getEnchantments()) {
+                if (e == null) continue;
+                ench.add(new EnchantmentEntity(e.getStatId(), e.getDeltaValue(),
+                        e.getPixelX(), e.getPixelY(), e.getPixelColor()));
+            }
+            entity.setEnchantments(ench);
+        }
+        return entity;
+    }
+
+    /** Inverse of {@link #toItemEntity(GameItemRefDto)} — used by load paths. */
+    public static GameItemRefDto toItemDto(final GameItemRefEntity entity) {
+        if (entity == null) return null;
+        final GameItemRefDto dto = new GameItemRefDto();
+        dto.setGameItemRefId(entity.getGameItemRefId());
+        dto.setItemId(entity.getItemId());
+        dto.setSlotIdx(entity.getSlotIdx());
+        dto.setItemUuid(entity.getItemUuid());
+        dto.setStackCount(entity.getStackCount() != null ? entity.getStackCount() : Integer.valueOf(1));
+        if (entity.getEnchantments() != null && !entity.getEnchantments().isEmpty()) {
+            final java.util.List<EnchantmentDto> ench = new ArrayList<>(entity.getEnchantments().size());
+            for (final EnchantmentEntity e : entity.getEnchantments()) {
+                if (e == null) continue;
+                ench.add(new EnchantmentDto(e.getStatId(), e.getDeltaValue(),
+                        e.getPixelX(), e.getPixelY(), e.getPixelColor()));
+            }
+            dto.setEnchantments(ench);
+        }
+        return dto;
     }
 }

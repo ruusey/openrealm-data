@@ -84,12 +84,148 @@ export class GameRenderer {
 
         // Billboard sprite references — updated each frame with counter-rotation
         this._billboardSprites = [];
+
+        // ---- PIXI.Text pool ----
+        // Every `new PIXI.Text(...)` calls Texture.from(canvas, ...) internally,
+        // which auto-registers the BaseTexture in PIXI.utils.BaseTextureCache.
+        // Default destroy() does NOT remove from that cache, so creating fresh
+        // Text instances per frame leaks <canvas>+context+WebGLTexture forever
+        // (heap snapshot showed 8,879 detached canvases retained via
+        //   pixiid_NNN ─ BaseTextureCache → BaseTexture → CanvasResource → canvas).
+        // The pool keeps Text instances alive frame-to-frame in a persistent
+        // _textContainer so .text and position are mutated rather than allocated.
+        this._textContainer = null;        // PIXI.Container, never destroyed/cleared
+        this._namePool = new Map();        // entityId -> { text, content, color, lastSeenFrame }
+        this._damageTextSlots = [];        // PIXI.Text[]; reused per frame by index
+        this._statusLabelSlots = [];       // PIXI.Text[]; reused per frame by index
+        this._statusBgSlots = [];          // PIXI.Graphics[]; reused per frame by index
+        this._damageSlotIdx = 0;
+        this._statusSlotIdx = 0;
+        this._frameId = 0;                 // increments per render(); used for name-pool TTL
     }
 
     /** Force tile layer rebuild on next frame (call on realm transition). */
     invalidateTileCache() {
         this._tileCacheKey = null;
         this._billboardSprites = [];
+    }
+
+    /** Acquire (or create) the long-lived Text for an entity's name label.
+     *  The text+style only re-rasterize when content or color actually change. */
+    _acquireNameText(entityId, content, color) {
+        let entry = this._namePool.get(entityId);
+        if (!entry) {
+            const t = new PIXI.Text(content, {
+                fontSize: 16, fill: color,
+                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
+                stroke: 0x000000, strokeThickness: 3
+            });
+            t.anchor.set(0.5, 1);
+            this._textContainer.addChild(t);
+            entry = { text: t, content, color, lastSeenFrame: this._frameId };
+            this._namePool.set(entityId, entry);
+        } else {
+            entry.lastSeenFrame = this._frameId;
+            if (entry.content !== content) { entry.text.text = content; entry.content = content; }
+            if (entry.color !== color)   { entry.text.style.fill = color; entry.color = color; }
+            entry.text.visible = true;
+        }
+        return entry.text;
+    }
+
+    /** Acquire next slot from the damage-text pool (all damage texts share
+     *  a single style; only content + color/scale/alpha change per frame). */
+    _acquireDamageText(content, colorStr) {
+        const idx = this._damageSlotIdx++;
+        let t = this._damageTextSlots[idx];
+        if (!t) {
+            t = new PIXI.Text(content, {
+                fontSize: 24, fill: colorStr,
+                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
+                stroke: '#000000', strokeThickness: 4
+            });
+            t.anchor.set(0.5, 0.5);
+            this._textContainer.addChild(t);
+            t._cachedContent = content;
+            t._cachedColor = colorStr;
+            this._damageTextSlots[idx] = t;
+        } else {
+            if (t._cachedContent !== content) { t.text = content; t._cachedContent = content; }
+            if (t._cachedColor !== colorStr) { t.style.fill = colorStr; t._cachedColor = colorStr; }
+            t.visible = true;
+        }
+        return t;
+    }
+
+    /** Acquire next status-icon slot (background Graphics + label Text). */
+    _acquireStatusIcon(sym) {
+        const idx = this._statusSlotIdx++;
+        let bg = this._statusBgSlots[idx];
+        let label = this._statusLabelSlots[idx];
+        if (!bg) {
+            bg = new PIXI.Graphics();
+            this._textContainer.addChild(bg);
+            this._statusBgSlots[idx] = bg;
+        } else {
+            bg.clear();
+            bg.visible = true;
+        }
+        if (!label) {
+            label = new PIXI.Text(sym, {
+                fontSize: 9, fill: 0xFFFFFF,
+                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
+                stroke: 0x000000, strokeThickness: 1
+            });
+            label.anchor.set(0.5, 0.5);
+            this._textContainer.addChild(label);
+            label._cachedSym = sym;
+            this._statusLabelSlots[idx] = label;
+        } else {
+            if (label._cachedSym !== sym) { label.text = sym; label._cachedSym = sym; }
+            label.visible = true;
+        }
+        return { bg, label };
+    }
+
+    /** Hide pool slots not used this frame, and evict name-pool entries for
+     *  entities not seen for a couple of seconds. Properly removes texture
+     *  cache entries before destroying — otherwise the canvas leaks via
+     *  PIXI.utils.BaseTextureCache (the very leak this pool exists to prevent). */
+    _endTextFrame() {
+        for (let i = this._damageSlotIdx; i < this._damageTextSlots.length; i++) {
+            this._damageTextSlots[i].visible = false;
+        }
+        for (let i = this._statusSlotIdx; i < this._statusLabelSlots.length; i++) {
+            if (this._statusLabelSlots[i]) this._statusLabelSlots[i].visible = false;
+            if (this._statusBgSlots[i]) this._statusBgSlots[i].visible = false;
+        }
+        // Prune stale name-pool entries every ~2 seconds
+        if ((this._frameId & 127) === 0) {
+            const cutoff = this._frameId - 180; // ~3 seconds at 60fps
+            for (const [id, entry] of this._namePool) {
+                if (entry.lastSeenFrame < cutoff) {
+                    this._destroyPooledText(entry.text);
+                    this._namePool.delete(id);
+                }
+            }
+        }
+    }
+
+    /** Properly destroy a pooled Text — removes from BaseTextureCache/TextureCache
+     *  before destroying, so the underlying <canvas>+context+WebGLTexture become
+     *  GC-able rather than retained by the global cache forever. */
+    _destroyPooledText(t) {
+        if (!t || t.destroyed) return;
+        if (t.parent) t.parent.removeChild(t);
+        const tex = t.texture;
+        if (tex) {
+            try { if (PIXI.Texture.removeFromCache) PIXI.Texture.removeFromCache(tex); } catch(_) {}
+            const bt = tex.baseTexture;
+            if (bt) {
+                try { if (PIXI.BaseTexture.removeFromCache) PIXI.BaseTexture.removeFromCache(bt); } catch(_) {}
+            }
+        }
+        try { t.destroy({ children: false, texture: true, baseTexture: true }); } catch(_) {}
     }
 
     async init() {
@@ -119,6 +255,10 @@ export class GameRenderer {
         this.healthBarGraphics = new PIXI.Graphics();
         this.uiLayer.addChild(this.healthBarGraphics);
 
+        // Persistent container for pooled PIXI.Text instances. Lives in uiLayer
+        // (screen-space) above healthbars. Never destroyed/cleared per frame.
+        this._textContainer = new PIXI.Container();
+        this.uiLayer.addChild(this._textContainer);
     }
 
     async loadTexture(key, url) {
@@ -215,20 +355,32 @@ export class GameRenderer {
         this.worldLayer.position.set(Math.round(screenW / 2), Math.round(screenH / 2));
         this.worldLayer.rotation = angle;
 
-        // Clear UI layer (damage text, etc.) - keep healthbar graphics
-        const keep = this.healthBarGraphics;
-        while (this.uiLayer.children.length > 0) {
-            const child = this.uiLayer.children[0];
-            this.uiLayer.removeChildAt(0);
-            if (child !== keep) child.destroy();
+        // Clear UI layer (damage text, etc.) - keep healthbar graphics AND the
+        // persistent pooled-text container.
+        const keepers = [this.healthBarGraphics, this._textContainer];
+        for (let i = this.uiLayer.children.length - 1; i >= 0; i--) {
+            const child = this.uiLayer.children[i];
+            if (keepers.indexOf(child) !== -1) continue;
+            this.uiLayer.removeChildAt(i);
+            child.destroy();
         }
-        this.uiLayer.addChild(keep);
+        // Ensure both keepers are present (and z-ordered: healthbars under text)
+        if (this.healthBarGraphics.parent !== this.uiLayer) this.uiLayer.addChild(this.healthBarGraphics);
+        if (this._textContainer.parent !== this.uiLayer) this.uiLayer.addChild(this._textContainer);
+
+        // Reset per-frame pool counters BEFORE renderEntities/renderDamageTexts run
+        this._frameId++;
+        this._damageSlotIdx = 0;
+        this._statusSlotIdx = 0;
 
         this.renderTiles(gameState, screenW, screenH, angle);
         this.renderEntities(gameState, angle);
         this.renderVisualEffects(gameState, angle);
         this.renderHealthBars(gameState, angle);
         this.renderDamageTexts(gameState, angle);
+
+        // Hide unused pool slots and prune stale name-pool entries
+        this._endTextFrame();
     }
 
     renderTiles(gameState, screenW, screenH, angle) {
@@ -692,26 +844,34 @@ export class GameRenderer {
         bars.endFill();
         bb.addChild(bars);
 
-        // Player name above bars (other players only)
+        // Player name above bars (other players only).
+        // Pooled in _textContainer (screen-space) instead of inside `bb`, so the
+        // Text instance survives the per-frame entityLayer destroy and we don't
+        // leak <canvas> via PIXI.utils.BaseTextureCache.
         let iconAnchorY = barY - 2;
         if (!isLocal) {
             const name = player.name || CLASS_NAMES[classId] || 'Player';
             const nameColor = GameRenderer.getNameColorHex(player.chatRole);
-            const nameText = new PIXI.Text(name, {
-                fontSize: 16, fill: nameColor,
-                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
-                stroke: 0x000000, strokeThickness: 3
-            });
-            nameText.anchor.set(0.5, 1);
-            nameText.x = 0;
-            nameText.y = barY - 2;
-            bb.addChild(nameText);
+            // Entity world-pixel center → screen coords. Add (0, barY-2) — the
+            // original offset was inside the billboarded `bb` whose local Y axis
+            // is screen-up, so the same offset applies in screen space.
+            const cxWorld = (player.pos.x || 0) + (player.size || PLAYER_SIZE) / 2;
+            const cyWorld = (player.pos.y || 0) + (player.size || PLAYER_SIZE) / 2;
+            const screen = this.worldToScreen(cxWorld, cyWorld, gameState);
+            const nameText = this._acquireNameText('p:' + String(player.id), name, nameColor);
+            nameText.x = screen.x;
+            nameText.y = screen.y + (barY - 2);
             iconAnchorY = barY - 18;
         }
 
-        // Status effect icons above health bars / name
+        // Status effect icons above health bars / name. Pooled in screen-space.
         const playerEffects = isLocal ? gameState.effectIds : (player.effectIds || []);
-        this._drawStatusIcons(playerEffects, 0, iconAnchorY, bb);
+        if (playerEffects && playerEffects.length) {
+            const cxWorld = (player.pos.x || 0) + (player.size || PLAYER_SIZE) / 2;
+            const cyWorld = (player.pos.y || 0) + (player.size || PLAYER_SIZE) / 2;
+            const sc = this.worldToScreen(cxWorld, cyWorld, gameState);
+            this._drawStatusIcons(playerEffects, sc.x, sc.y + iconAnchorY);
+        }
 
         this.entityLayer.addChild(bb);
     }
@@ -772,23 +932,23 @@ export class GameRenderer {
             bb.addChild(g);
         }
 
-        // Enemy name
+        // Enemy name — pooled (see player-name comment above)
         let enemyIconAnchorY = ly - 2;
         if (enemyDef) {
-            const nameText = new PIXI.Text(enemyDef.name || `Enemy`, {
-                fontSize: 16, fill: 0xff8080,
-                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
-                stroke: 0x000000, strokeThickness: 3
-            });
-            nameText.anchor.set(0.5, 1);
-            nameText.x = 0;
-            nameText.y = ly - 2;
-            bb.addChild(nameText);
+            const cxWorld = (enemy.pos.x || 0) + (enemy.size || PLAYER_SIZE) / 2;
+            const cyWorld = (enemy.pos.y || 0) + (enemy.size || PLAYER_SIZE) / 2;
+            const screen = this.worldToScreen(cxWorld, cyWorld, gameState);
+            const nameText = this._acquireNameText('e:' + String(enemy.id), enemyDef.name || 'Enemy', 0xff8080);
+            nameText.x = screen.x;
+            nameText.y = screen.y + (ly - 2);
             enemyIconAnchorY = ly - 18;
         }
 
-        if (enemy.effectIds) {
-            this._drawStatusIcons(enemy.effectIds, 0, enemyIconAnchorY, bb);
+        if (enemy.effectIds && enemy.effectIds.length) {
+            const cxWorld = (enemy.pos.x || 0) + (enemy.size || PLAYER_SIZE) / 2;
+            const cyWorld = (enemy.pos.y || 0) + (enemy.size || PLAYER_SIZE) / 2;
+            const sc = this.worldToScreen(cxWorld, cyWorld, gameState);
+            this._drawStatusIcons(enemy.effectIds, sc.x, sc.y + enemyIconAnchorY);
         }
 
         this.entityLayer.addChild(bb);
@@ -1261,16 +1421,10 @@ export class GameRenderer {
             const colorStr = '#' + dt.color.toString(16).padStart(6, '0');
             // Scale text slightly larger when fresh, shrink as it fades
             const scale = 0.8 + 0.4 * (dt.life / TEXT_LIFE);
-            const txt = new PIXI.Text(dt.text, {
-                fontSize: 24, fill: colorStr,
-                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
-                stroke: '#000000', strokeThickness: 4
-            });
-            txt.anchor.set(0.5, 0.5);
+            const txt = this._acquireDamageText(dt.text, colorStr);
             txt.x = sx; txt.y = sy;
             txt.alpha = alpha;
             txt.scale.set(scale);
-            this.uiLayer.addChild(txt);
         }
     }
 
@@ -1300,9 +1454,12 @@ export class GameRenderer {
      * @param {number} centerX - center X position (screen coords)
      * @param {number} topY - Y position above which icons are drawn
      */
-    _drawStatusIcons(effectIds, centerX, topY, container) {
+    /** Draws status icons centered on (screenCenterX, screenTopY-iconSize-2),
+     *  matching the original placement which was relative to the billboarded
+     *  bb container. Now pooled via _acquireStatusIcon → no per-frame Graphics
+     *  or PIXI.Text allocation. */
+    _drawStatusIcons(effectIds, screenCenterX, screenTopY) {
         if (!effectIds || !effectIds.length) return;
-        const target = container || this.entityLayer;
         const active = [];
         for (const [eid, sym, color] of GameRenderer.STATUS_ICON_DEFS) {
             if (this._hasEffect(effectIds, eid)) active.push({ sym, color });
@@ -1312,29 +1469,19 @@ export class GameRenderer {
         const iconSize = 12;
         const iconGap = 2;
         const totalWidth = active.length * iconSize + (active.length - 1) * iconGap;
-        let startX = centerX - totalWidth / 2;
-        const y = topY - iconSize - 2;
+        let startX = screenCenterX - totalWidth / 2;
+        const y = screenTopY - iconSize - 2;
 
         for (const { sym, color } of active) {
-            const bg = new PIXI.Graphics();
+            const { bg, label } = this._acquireStatusIcon(sym);
             bg.beginFill(0x000000, 0.6);
             bg.drawRoundedRect(startX, y, iconSize, iconSize, 2);
             bg.endFill();
             bg.beginFill(color, 0.9);
             bg.drawRoundedRect(startX + 1, y + 1, iconSize - 2, iconSize - 2, 1);
             bg.endFill();
-            target.addChild(bg);
-
-            const txt = new PIXI.Text(sym, {
-                fontSize: 9, fill: 0xFFFFFF,
-                fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
-                stroke: 0x000000, strokeThickness: 1
-            });
-            txt.anchor.set(0.5, 0.5);
-            txt.x = startX + iconSize / 2;
-            txt.y = y + iconSize / 2;
-            target.addChild(txt);
-
+            label.x = startX + iconSize / 2;
+            label.y = y + iconSize / 2;
             startX += iconSize + iconGap;
         }
     }
