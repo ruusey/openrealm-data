@@ -70,6 +70,7 @@ export class GameRenderer {
         this.mapData = {};  // mapId -> map definition
 
         // PixiJS layers
+        this.worldLayer = null; // Rotatable wrapper for tile + entity layers
         this.tileLayer = null;
         this.entityLayer = null;
         this.uiLayer = null;
@@ -80,11 +81,15 @@ export class GameRenderer {
 
         // Tile layer cache key — invalidated when visible tile range changes
         this._tileCacheKey = null;
+
+        // Billboard sprite references — updated each frame with counter-rotation
+        this._billboardSprites = [];
     }
 
     /** Force tile layer rebuild on next frame (call on realm transition). */
     invalidateTileCache() {
         this._tileCacheKey = null;
+        this._billboardSprites = [];
     }
 
     async init() {
@@ -100,14 +105,16 @@ export class GameRenderer {
         // Set nearest neighbor scaling for pixel art
         PIXI.settings.SCALE_MODE = PIXI.SCALE_MODES.NEAREST;
 
-        // Create layers
+        // Create layers — worldLayer wraps tile+entity for camera rotation
+        this.worldLayer = new PIXI.Container();
         this.tileLayer = new PIXI.Container();
         this.entityLayer = new PIXI.Container();
         this.uiLayer = new PIXI.Container();
 
-        this.app.stage.addChild(this.tileLayer);
-        this.app.stage.addChild(this.entityLayer);
-        this.app.stage.addChild(this.uiLayer);
+        this.worldLayer.addChild(this.tileLayer);
+        this.worldLayer.addChild(this.entityLayer);
+        this.app.stage.addChild(this.worldLayer);
+        this.app.stage.addChild(this.uiLayer); // UI stays unrotated
 
         this.healthBarGraphics = new PIXI.Graphics();
         this.uiLayer.addChild(this.healthBarGraphics);
@@ -199,11 +206,14 @@ export class GameRenderer {
 
         const camX = gameState.cameraX;
         const camY = gameState.cameraY;
+        const angle = gameState.cameraAngle || 0;
 
-        // Camera offset (center of screen) — round to integers to prevent
-        // sub-pixel gaps between tiles (thin black lines at tile seams)
-        const offsetX = Math.round(screenW / 2 - camX * SCALE);
-        const offsetY = Math.round(screenH / 2 - camY * SCALE);
+        // World layer: pivot at player center (cameraX/Y is top-left), centered on screen, rotated
+        const localPlayer = gameState.getLocalPlayer();
+        const playerHalf = ((localPlayer?.size || PLAYER_SIZE) / 2) * SCALE;
+        this.worldLayer.pivot.set(Math.round(camX * SCALE + playerHalf), Math.round(camY * SCALE + playerHalf));
+        this.worldLayer.position.set(Math.round(screenW / 2), Math.round(screenH / 2));
+        this.worldLayer.rotation = angle;
 
         // Clear UI layer (damage text, etc.) - keep healthbar graphics
         const keep = this.healthBarGraphics;
@@ -214,14 +224,14 @@ export class GameRenderer {
         }
         this.uiLayer.addChild(keep);
 
-        this.renderTiles(gameState, offsetX, offsetY, screenW, screenH);
-        this.renderEntities(gameState, offsetX, offsetY);
-        this.renderVisualEffects(gameState, offsetX, offsetY);
-        this.renderHealthBars(gameState, offsetX, offsetY);
-        this.renderDamageTexts(gameState, offsetX, offsetY);
+        this.renderTiles(gameState, screenW, screenH, angle);
+        this.renderEntities(gameState, angle);
+        this.renderVisualEffects(gameState, angle);
+        this.renderHealthBars(gameState, angle);
+        this.renderDamageTexts(gameState, angle);
     }
 
-    renderTiles(gameState, offsetX, offsetY, screenW, screenH) {
+    renderTiles(gameState, screenW, screenH, angle) {
         if (!gameState.mapTiles) return;
         const localPlayer = gameState.getLocalPlayer();
         if (!localPlayer) return;
@@ -230,24 +240,27 @@ export class GameRenderer {
         const playerTileX = Math.floor(localPlayer.pos.x / ts);
         const playerTileY = Math.floor(localPlayer.pos.y / ts);
 
-        const minR = Math.max(0, playerTileY - VIEWPORT_TILES);
-        const maxR = Math.min(gameState.mapHeight - 1, playerTileY + VIEWPORT_TILES);
-        const minC = Math.max(0, playerTileX - VIEWPORT_TILES);
-        const maxC = Math.min(gameState.mapWidth - 1, playerTileX + VIEWPORT_TILES);
+        // When rotated, the viewport diamond covers more tiles — expand range
+        const rotExpand = angle !== 0 ? Math.ceil(VIEWPORT_TILES * 0.42) : 0;
+        const range = VIEWPORT_TILES + rotExpand;
+
+        const minR = Math.max(0, playerTileY - range);
+        const maxR = Math.min(gameState.mapHeight - 1, playerTileY + range);
+        const minC = Math.max(0, playerTileX - range);
+        const maxC = Math.min(gameState.mapWidth - 1, playerTileX + range);
 
         // Cache key: only rebuild tiles when the visible tile range changes.
-        // Tiles are positioned relative to tile-grid origin; the layer's own
-        // position handles camera offset so we never touch child positions.
+        // Billboard rotation is updated separately without rebuilding.
         const cacheKey = `${minR},${maxR},${minC},${maxC},${gameState.mapWidth}`;
         if (this._tileCacheKey !== cacheKey) {
             this._tileCacheKey = cacheKey;
             this._rebuildTileLayer(gameState, minR, maxR, minC, maxC, ts);
         }
 
-        // Move the entire tile layer to account for camera movement —
-        // individual sprites stay at fixed grid-relative positions.
-        this.tileLayer.x = offsetX;
-        this.tileLayer.y = offsetY;
+        // Update billboard sprites (decoration/object tiles) to face camera
+        for (const item of this._billboardSprites) {
+            item.rotation = -angle;
+        }
     }
 
     /** Rebuild the tile layer from scratch (only when visible range changes). */
@@ -256,6 +269,7 @@ export class GameRenderer {
             this.tileLayer.children[i].destroy();
         }
         this.tileLayer.removeChildren();
+        this._billboardSprites = [];
 
         const drawSize = ts * SCALE;
 
@@ -264,7 +278,6 @@ export class GameRenderer {
             for (let c = minC; c <= maxC; c++) {
                 const tile = gameState.mapTiles[r]?.[c];
                 if (!tile || tile.base <= 0) continue;
-                // Positions relative to tile grid origin (no camera offset)
                 const sx = c * ts * SCALE;
                 const sy = r * ts * SCALE;
                 const tex = this.tileTextures[tile.base];
@@ -299,6 +312,7 @@ export class GameRenderer {
                 const isObject = hasCollision && !isWall;
 
                 if (isWall) {
+                    // Walls rotate with the world — no billboarding
                     const isWallAt = (rr, cc) => {
                         const t = gameState.mapTiles[rr]?.[cc];
                         if (!t || t.collision <= 0) return false;
@@ -380,32 +394,50 @@ export class GameRenderer {
                         this.tileLayer.addChild(hl);
                     }
                 } else if (isObject) {
+                    // Collision objects (trees, rocks) — billboard to face camera
+                    const bbContainer = new PIXI.Container();
+                    bbContainer.position.set(sx + drawSize / 2, sy + drawSize / 2);
+
+                    // Shadow (drawn at bottom of sprite)
                     const shadowG = new PIXI.Graphics();
                     shadowG.beginFill(0x000000, 0.35);
-                    shadowG.drawEllipse(sx + drawSize / 2, sy + drawSize * 0.9, drawSize * 0.4, drawSize * 0.12);
+                    shadowG.drawEllipse(0, drawSize * 0.4, drawSize * 0.4, drawSize * 0.12);
                     shadowG.endFill();
-                    this.tileLayer.addChild(shadowG);
-                    addSpriteWithOutline(this.tileLayer, tex, sx, sy, drawSize, drawSize);
+                    bbContainer.addChild(shadowG);
+
+                    addSpriteWithOutline(bbContainer, tex,
+                        -drawSize / 2, -drawSize / 2, drawSize, drawSize);
                     const spr = new PIXI.Sprite(tex);
-                    spr.x = sx; spr.y = sy;
+                    spr.x = -drawSize / 2; spr.y = -drawSize / 2;
                     spr.width = drawSize; spr.height = drawSize;
-                    this.tileLayer.addChild(spr);
+                    bbContainer.addChild(spr);
+
+                    this.tileLayer.addChild(bbContainer);
+                    this._billboardSprites.push(bbContainer);
                 } else {
+                    // Decoration tiles (bushes, flowers) — billboard to face camera
+                    const bbContainer = new PIXI.Container();
+                    bbContainer.position.set(sx + drawSize / 2, sy + drawSize / 2);
+
                     const decShadow = new PIXI.Graphics();
                     decShadow.beginFill(0x000000, 0.25);
-                    decShadow.drawEllipse(sx + drawSize / 2, sy + drawSize + drawSize * 0.08, drawSize * 0.3, drawSize * 0.07);
+                    decShadow.drawEllipse(0, drawSize * 0.58, drawSize * 0.3, drawSize * 0.07);
                     decShadow.endFill();
-                    this.tileLayer.addChild(decShadow);
+                    bbContainer.addChild(decShadow);
+
                     const spr = new PIXI.Sprite(tex);
-                    spr.x = sx; spr.y = sy;
+                    spr.x = -drawSize / 2; spr.y = -drawSize / 2;
                     spr.width = drawSize; spr.height = drawSize;
-                    this.tileLayer.addChild(spr);
+                    bbContainer.addChild(spr);
+
+                    this.tileLayer.addChild(bbContainer);
+                    this._billboardSprites.push(bbContainer);
                 }
             }
         }
     }
 
-    renderEntities(gameState, offsetX, offsetY) {
+    renderEntities(gameState, angle) {
         // Destroy all children to free GPU memory
         for (let i = this.entityLayer.children.length - 1; i >= 0; i--) {
             this.entityLayer.children[i].destroy();
@@ -426,30 +458,29 @@ export class GameRenderer {
         sortable.sort((a, b) => a.y - b.y);
 
         for (const ent of sortable) {
-            if (ent.type === 'loot') this.renderLootContainer(ent.data, offsetX, offsetY, gameState);
-            else if (ent.type === 'portal') this.renderPortal(ent.data, offsetX, offsetY, gameState);
-            else if (ent.type === 'enemy') this.renderEnemy(ent.data, offsetX, offsetY, gameState);
-            else if (ent.type === 'player') this.renderPlayer(ent.data, offsetX, offsetY, ent.id === gameState.playerId, gameState);
+            if (ent.type === 'loot') this.renderLootContainer(ent.data, angle, gameState);
+            else if (ent.type === 'portal') this.renderPortal(ent.data, angle, gameState);
+            else if (ent.type === 'enemy') this.renderEnemy(ent.data, angle, gameState);
+            else if (ent.type === 'player') this.renderPlayer(ent.data, angle, ent.id === gameState.playerId, gameState);
         }
 
         // Render bullets — viewport-culled + capped for performance.
+        // Bullets are in world-pixel space inside the rotated worldLayer.
         const bulletGfx = new PIXI.Graphics();
         if (!this._bulletTexCache) this._bulletTexCache = {};
         const screenW = this.app.screen.width, screenH = this.app.screen.height;
+        // Expand cull bounds when rotated since worldLayer is rotated
+        const cullMargin = angle !== 0 ? 256 : 64;
+        const camX = gameState.cameraX * SCALE, camY = gameState.cameraY * SCALE;
+        const halfW = screenW / 2 + cullMargin, halfH = screenH / 2 + cullMargin;
         const MAX_RENDERED_BULLETS = 200;
         let bulletCount = 0;
-        // User setting: hide OTHER players' projectiles entirely to save CPU
-        // in crowded areas. Our own bullets and enemy bullets always render.
         const hideOtherPlayerBullets = !!(gameState.settings
                 && gameState.settings.graphics
                 && gameState.settings.graphics.hideOtherPlayerBullets);
         const localPlayerId = gameState.playerId;
 
         for (const [id, bullet] of gameState.bullets) {
-            // Filter out other players' bullets when the setting is enabled.
-            // A bullet is a "player bullet" iff it has the PLAYER_PROJECTILE
-            // flag. It's MINE iff its srcEntityId matches my player id (or it
-            // was locally predicted and has a negative id).
             if (hideOtherPlayerBullets && bullet.flags
                     && bullet.flags.includes(ProjectileFlag.PLAYER_PROJECTILE)) {
                 const isMine = bullet._predicted
@@ -457,11 +488,12 @@ export class GameRenderer {
                 if (!isMine) continue;
             }
 
-            const sx = bullet.pos.x * SCALE + offsetX;
-            const sy = bullet.pos.y * SCALE + offsetY;
+            // World-pixel position (no offsetX/Y — worldLayer handles camera)
+            const sx = bullet.pos.x * SCALE;
+            const sy = bullet.pos.y * SCALE;
 
-            // Viewport culling — skip bullets outside screen bounds
-            if (sx < -64 || sx > screenW + 64 || sy < -64 || sy > screenH + 64) continue;
+            // Viewport culling — approximate distance from camera center
+            if (Math.abs(sx - camX) > halfW || Math.abs(sy - camY) > halfH) continue;
             if (++bulletCount > MAX_RENDERED_BULLETS) break;
 
             const size = (bullet.size || 4) * SCALE;
@@ -499,7 +531,7 @@ export class GameRenderer {
         }
     }
 
-    renderPlayer(player, offsetX, offsetY, isLocal, gameState) {
+    renderPlayer(player, angle, isLocal, gameState) {
         const collisionSize = (player.size || PLAYER_SIZE) * SCALE;
         const size = PLAYER_RENDER_SIZE * SCALE;
         const renderOffset = (size - collisionSize) / 2;
@@ -507,8 +539,9 @@ export class GameRenderer {
         const py = isLocal && player._renderY !== undefined ? player._renderY : player.pos.y;
         const smX = isLocal ? (player._smoothX || 0) * SCALE : 0;
         const smY = isLocal ? (player._smoothY || 0) * SCALE : 0;
-        const sx = px * SCALE + offsetX - renderOffset + smX;
-        const sy = py * SCALE + offsetY - renderOffset + smY;
+        // World-pixel position (worldLayer handles camera offset + rotation)
+        const sx = px * SCALE - renderOffset + smX;
+        const sy = py * SCALE - renderOffset + smY;
 
         // Animation-driven sprite selection
         const classId = player.classId || 0;
@@ -563,12 +596,19 @@ export class GameRenderer {
         const wadingClip = wading ? 0.30 : 0;
         const visibleHeight = size * (1 - wadingClip);
 
+        // Billboard container: counter-rotate so player always faces camera
+        const bb = new PIXI.Container();
+        bb.position.set(sx + size / 2, sy + size / 2);
+        bb.rotation = -angle;
+        // All child positions are relative to container center (-size/2 offsets)
+        const lx = -size / 2, ly = -size / 2;
+
         // Circular ground shadow under player
         const pShadow = new PIXI.Graphics();
         pShadow.beginFill(0x000000, 0.3);
-        pShadow.drawEllipse(sx + size / 2, sy + size + size * 0.08, size * 0.4, size * 0.12);
+        pShadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
         pShadow.endFill();
-        this.entityLayer.addChild(pShadow);
+        bb.addChild(pShadow);
 
         const spW = animDef?.spriteSize || BASE_SPRITE_SIZE;
         const spH = animDef?.spriteHeight || spW;
@@ -577,7 +617,7 @@ export class GameRenderer {
             const flipX = player.facing === 'left';
 
             const spr = new PIXI.Sprite(tex);
-            spr.x = sx; spr.y = sy;
+            spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
             if (flipX) { spr.anchor.set(1, 0); spr.scale.x = -Math.abs(spr.scale.x); }
 
@@ -601,38 +641,35 @@ export class GameRenderer {
             // Wading effect: shift sprite down so the character sinks into the
             // liquid, then mask off the bottom so it looks submerged.
             if (wading) {
-                const sinkOffset = size * wadingClip; // how far down the sprite shifts
-                spr.y = sy + sinkOffset;
-                // Mask stays at the original ground level — clips the shifted sprite
+                const sinkOffset = size * wadingClip;
+                spr.y = ly + sinkOffset;
                 const mask = new PIXI.Graphics();
                 mask.beginFill(0xFFFFFF);
-                mask.drawRect(sx - 2, sy, size + 4, size);
+                mask.drawRect(lx - 2, ly, size + 4, size);
                 mask.endFill();
-                this.entityLayer.addChild(mask);
+                bb.addChild(mask);
                 spr.mask = mask;
-                addSpriteWithOutline(this.entityLayer, tex, sx, spr.y, size, size,
+                addSpriteWithOutline(bb, tex, lx, spr.y, size, size,
                     flipX ? { flipX: true, mask } : { mask });
             } else {
-                addSpriteWithOutline(this.entityLayer, tex, sx, sy, size, size,
+                addSpriteWithOutline(bb, tex, lx, ly, size, size,
                     flipX ? { flipX: true } : null);
             }
-            this.entityLayer.addChild(spr);
+            bb.addChild(spr);
         } else {
-            // Fallback: colored square
             const g = new PIXI.Graphics();
             g.beginFill(isLocal ? 0x40c040 : 0x4080e0);
-            g.drawRect(sx, sy, size, size);
+            g.drawRect(lx, ly, size, size);
             g.endFill();
-            this.entityLayer.addChild(g);
+            bb.addChild(g);
         }
 
         // HP and MP bars above player sprite
         const barWidth = size;
         const barHeight = 4;
         const barGap = 2;
-        const barY = sy - barHeight * 2 - barGap - 4;
+        const barY = ly - barHeight * 2 - barGap - 4;
 
-        // Get health/mana data
         const hp = isLocal ? gameState.health : (player.health || 0);
         const maxHp = isLocal ? (gameState.getComputedStats()?.hp || gameState.maxHealth || 100) : (player.maxHealth || 100);
         const mp = isLocal ? gameState.mana : (player.mana || 0);
@@ -641,25 +678,21 @@ export class GameRenderer {
         const mpPct = maxMp > 0 ? Math.min(1, mp / maxMp) : 1;
 
         const bars = new PIXI.Graphics();
-        // HP bar background
         bars.beginFill(0x222222, 0.7);
-        bars.drawRect(sx, barY, barWidth, barHeight);
+        bars.drawRect(lx, barY, barWidth, barHeight);
         bars.endFill();
-        // HP bar fill
         bars.beginFill(0x40c040, 0.9);
-        bars.drawRect(sx, barY, barWidth * hpPct, barHeight);
+        bars.drawRect(lx, barY, barWidth * hpPct, barHeight);
         bars.endFill();
-        // MP bar background
         bars.beginFill(0x222222, 0.7);
-        bars.drawRect(sx, barY + barHeight + barGap, barWidth, barHeight);
+        bars.drawRect(lx, barY + barHeight + barGap, barWidth, barHeight);
         bars.endFill();
-        // MP bar fill
         bars.beginFill(0x4080e0, 0.9);
-        bars.drawRect(sx, barY + barHeight + barGap, barWidth * mpPct, barHeight);
+        bars.drawRect(lx, barY + barHeight + barGap, barWidth * mpPct, barHeight);
         bars.endFill();
-        this.entityLayer.addChild(bars);
+        bb.addChild(bars);
 
-        // Player name above bars (other players only — local player name goes in sidebar)
+        // Player name above bars (other players only)
         let iconAnchorY = barY - 2;
         if (!isLocal) {
             const name = player.name || CLASS_NAMES[classId] || 'Player';
@@ -670,23 +703,30 @@ export class GameRenderer {
                 stroke: 0x000000, strokeThickness: 3
             });
             nameText.anchor.set(0.5, 1);
-            nameText.x = sx + size / 2;
+            nameText.x = 0;
             nameText.y = barY - 2;
-            this.entityLayer.addChild(nameText);
+            bb.addChild(nameText);
             iconAnchorY = barY - 18;
         }
 
         // Status effect icons above health bars / name
         const playerEffects = isLocal ? gameState.effectIds : (player.effectIds || []);
-        this._drawStatusIcons(playerEffects, sx + size / 2, iconAnchorY);
+        this._drawStatusIcons(playerEffects, 0, iconAnchorY, bb);
+
+        this.entityLayer.addChild(bb);
     }
 
-    renderEnemy(enemy, offsetX, offsetY, gameState) {
-        const sx = enemy.pos.x * SCALE + offsetX;
-        const sy = enemy.pos.y * SCALE + offsetY;
+    renderEnemy(enemy, angle, gameState) {
+        const sx = enemy.pos.x * SCALE;
+        const sy = enemy.pos.y * SCALE;
         const size = (enemy.size || PLAYER_SIZE) * SCALE;
 
-        // Try enemy sprite from data
+        // Billboard container: counter-rotate so enemy faces camera
+        const bb = new PIXI.Container();
+        bb.position.set(sx + size / 2, sy + size / 2);
+        bb.rotation = -angle;
+        const lx = -size / 2, ly = -size / 2;
+
         const enemyDef = gameState.enemyData[enemy.enemyId];
         let tex = null;
         if (enemyDef && enemyDef.spriteKey) {
@@ -695,19 +735,18 @@ export class GameRenderer {
             tex = this.getRegion(enemyDef.spriteKey, enemyDef.col || 0, enemyDef.row || 0, sw, sh);
         }
 
-        // Circular ground shadow under enemy
+        // Shadow
         const shadowG = new PIXI.Graphics();
         shadowG.beginFill(0x000000, 0.3);
-        shadowG.drawEllipse(sx + size / 2, sy + size + size * 0.08, size * 0.4, size * 0.12);
+        shadowG.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
         shadowG.endFill();
-        this.entityLayer.addChild(shadowG);
+        bb.addChild(shadowG);
 
         if (tex) {
             const spr = new PIXI.Sprite(tex);
-            spr.x = sx; spr.y = sy;
+            spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
 
-            // Status effect tinting — all ProjectileEffectTypes that affect enemies
             if (enemy.effectIds) {
                 if (this._hasEffect(enemy.effectIds, StatusEffect.STASIS))      spr.tint = 0x333338;
                 else if (this._hasEffect(enemy.effectIds, StatusEffect.INVINCIBLE))  spr.tint = 0xFFFFCC;
@@ -723,18 +762,18 @@ export class GameRenderer {
                 else if (this._hasEffect(enemy.effectIds, StatusEffect.SPEEDY))      spr.tint = 0xBBFF88;
                 else if (this._hasEffect(enemy.effectIds, StatusEffect.HEALING))     spr.tint = 0xFF8888;
             }
-            addSpriteWithOutline(this.entityLayer, tex, sx, sy, size, size);
-            this.entityLayer.addChild(spr);
+            addSpriteWithOutline(bb, tex, lx, ly, size, size);
+            bb.addChild(spr);
         } else {
             const g = new PIXI.Graphics();
             g.beginFill(0xe04040);
-            g.drawRect(sx, sy, size, size);
+            g.drawRect(lx, ly, size, size);
             g.endFill();
-            this.entityLayer.addChild(g);
+            bb.addChild(g);
         }
 
         // Enemy name
-        let enemyIconAnchorY = sy - 2;
+        let enemyIconAnchorY = ly - 2;
         if (enemyDef) {
             const nameText = new PIXI.Text(enemyDef.name || `Enemy`, {
                 fontSize: 16, fill: 0xff8080,
@@ -742,23 +781,24 @@ export class GameRenderer {
                 stroke: 0x000000, strokeThickness: 3
             });
             nameText.anchor.set(0.5, 1);
-            nameText.x = sx + size / 2;
-            nameText.y = sy - 2;
-            this.entityLayer.addChild(nameText);
-            enemyIconAnchorY = sy - 18;
+            nameText.x = 0;
+            nameText.y = ly - 2;
+            bb.addChild(nameText);
+            enemyIconAnchorY = ly - 18;
         }
 
-        // Status effect icons above enemy name
         if (enemy.effectIds) {
-            this._drawStatusIcons(enemy.effectIds, sx + size / 2, enemyIconAnchorY);
+            this._drawStatusIcons(enemy.effectIds, 0, enemyIconAnchorY, bb);
         }
+
+        this.entityLayer.addChild(bb);
     }
 
     // renderBullet removed — bullets are now batched inline in renderEntities()
 
-    renderLootContainer(loot, offsetX, offsetY, gameState) {
-        const sx = loot.pos.x * SCALE + offsetX;
-        const sy = loot.pos.y * SCALE + offsetY;
+    renderLootContainer(loot, angle, gameState) {
+        const sx = loot.pos.x * SCALE;
+        const sy = loot.pos.y * SCALE;
         const fullSize = this.tileSize * SCALE;
         const tier = loot.tier;
         const isChest = loot.isChest || tier === -1;
@@ -769,14 +809,18 @@ export class GameRenderer {
         const ox = renderFull ? 0 : fullSize / 4;
         const oy = renderFull ? 0 : fullSize / 4;
 
-        // Circular ground shadow (slightly below sprite)
+        // Billboard container
+        const bb = new PIXI.Container();
+        bb.position.set(sx + ox + size / 2, sy + oy + size / 2);
+        bb.rotation = -angle;
+        const lx = -size / 2, ly = -size / 2;
+
         const shadowG = new PIXI.Graphics();
         shadowG.beginFill(0x000000, 0.3);
-        shadowG.drawEllipse(sx + ox + size / 2, sy + oy + size + size * 0.08, size * 0.35, size * 0.1);
+        shadowG.drawEllipse(0, size / 2 + size * 0.08, size * 0.35, size * 0.1);
         shadowG.endFill();
-        this.entityLayer.addChild(shadowG);
+        bb.addChild(shadowG);
 
-        // Data-driven loot sprite lookup
         let tex = null;
         if (lootDef) {
             tex = this.getRegion(lootDef.spriteKey.replace('.png', ''), lootDef.col, lootDef.row, BASE_SPRITE_SIZE, BASE_SPRITE_SIZE);
@@ -789,24 +833,31 @@ export class GameRenderer {
 
         if (tex) {
             const spr = new PIXI.Sprite(tex);
-            spr.x = sx + ox; spr.y = sy + oy;
+            spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
-            this.entityLayer.addChild(spr);
+            bb.addChild(spr);
         } else {
             const g = new PIXI.Graphics();
             g.beginFill(isChest ? 0xc8a86e : 0x8b6914);
-            g.drawRect(sx + ox + 2, sy + oy + 2, size - 4, size - 4);
+            g.drawRect(lx + 2, ly + 2, size - 4, size - 4);
             g.endFill();
-            this.entityLayer.addChild(g);
+            bb.addChild(g);
         }
+
+        this.entityLayer.addChild(bb);
     }
 
-    renderPortal(portal, offsetX, offsetY, gameState) {
-        const sx = portal.pos.x * SCALE + offsetX;
-        const sy = portal.pos.y * SCALE + offsetY;
+    renderPortal(portal, angle, gameState) {
+        const sx = portal.pos.x * SCALE;
+        const sy = portal.pos.y * SCALE;
         const size = this.tileSize * SCALE;
 
-        // Look up portal sprite from portal model data (portals.json)
+        // Billboard container
+        const bb = new PIXI.Container();
+        bb.position.set(sx + size / 2, sy + size / 2);
+        bb.rotation = -angle;
+        const lx = -size / 2, ly = -size / 2;
+
         const portalDef = gameState ? gameState.portalData[portal.portalId] : null;
         let tex = null;
         if (portalDef && portalDef.spriteKey) {
@@ -816,57 +867,60 @@ export class GameRenderer {
                                  portalDef.row || 0, sw, sh);
         }
 
-        // Circular ground shadow
         const portalShadow = new PIXI.Graphics();
         portalShadow.beginFill(0x000000, 0.3);
-        portalShadow.drawEllipse(sx + size / 2, sy + size + size * 0.08, size * 0.4, size * 0.12);
+        portalShadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
         portalShadow.endFill();
-        this.entityLayer.addChild(portalShadow);
+        bb.addChild(portalShadow);
 
         if (tex) {
             const spr = new PIXI.Sprite(tex);
-            spr.x = sx; spr.y = sy;
+            spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
-            this.entityLayer.addChild(spr);
+            bb.addChild(spr);
         } else {
-            // Fallback: purple circle
             const g = new PIXI.Graphics();
             g.beginFill(0x8040c0, 0.6);
-            g.drawCircle(sx + size / 2, sy + size / 2, size / 2);
+            g.drawCircle(0, 0, size / 2);
             g.endFill();
             g.lineStyle(2, 0xc080ff, 0.8);
-            g.drawCircle(sx + size / 2, sy + size / 2, size / 2);
-            this.entityLayer.addChild(g);
+            g.drawCircle(0, 0, size / 2);
+            bb.addChild(g);
         }
+
+        this.entityLayer.addChild(bb);
     }
 
-    renderHealthBars(gameState, offsetX, offsetY) {
+    renderHealthBars(gameState, angle) {
         this.healthBarGraphics.clear();
 
         for (const [id, enemy] of gameState.enemies) {
             if (enemy.maxHealth <= 0) continue;
-            const sx = enemy.pos.x * SCALE + offsetX;
-            const sy = enemy.pos.y * SCALE + offsetY;
             const size = (enemy.size || PLAYER_SIZE) * SCALE;
+            // Convert world position to screen position for unrotated UI layer
+            const screen = this.worldToScreen(
+                enemy.pos.x + (enemy.size || PLAYER_SIZE) / 2,
+                enemy.pos.y + (enemy.size || PLAYER_SIZE) / 2,
+                gameState
+            );
             const barW = size;
             const barH = 4;
-            const barY = sy + size + 2;
+            const barX = screen.x - barW / 2;
+            const barY = screen.y + size / 2 + 2;
 
             const pct = Math.max(0, enemy.health / enemy.maxHealth);
 
-            // Background
             this.healthBarGraphics.beginFill(0x333333);
-            this.healthBarGraphics.drawRect(sx, barY, barW, barH);
+            this.healthBarGraphics.drawRect(barX, barY, barW, barH);
             this.healthBarGraphics.endFill();
 
-            // Fill
             this.healthBarGraphics.beginFill(pct > 0.5 ? 0x40c040 : pct > 0.25 ? 0xc0c040 : 0xc04040);
-            this.healthBarGraphics.drawRect(sx, barY, barW * pct, barH);
+            this.healthBarGraphics.drawRect(barX, barY, barW * pct, barH);
             this.healthBarGraphics.endFill();
         }
     }
 
-    renderVisualEffects(gameState, offsetX, offsetY) {
+    renderVisualEffects(gameState, angle) {
         if (!gameState.visualEffects || gameState.visualEffects.length === 0) return;
         const now = Date.now();
         const g = new PIXI.Graphics();
@@ -875,8 +929,9 @@ export class GameRenderer {
             const elapsed = now - fx.startTime;
             const progress = Math.min(elapsed / fx.duration, 1.0);
             const alpha = 1.0 - progress; // fade out over duration
-            const sx = fx.x * SCALE + offsetX;
-            const sy = fx.y * SCALE + offsetY;
+            const screen = this.worldToScreen(fx.x, fx.y, gameState);
+            const sx = screen.x;
+            const sy = screen.y;
             const r = fx.radius * SCALE;
 
             switch (fx.type) {
@@ -926,8 +981,8 @@ export class GameRenderer {
                     break;
 
                 case 3: { // CHAIN_LIGHTNING — electric arc between two points
-                    const tx = fx.targetX * SCALE + offsetX;
-                    const ty = fx.targetY * SCALE + offsetY;
+                    const _ts = this.worldToScreen(fx.targetX, fx.targetY, gameState);
+                    const tx = _ts.x, ty = _ts.y;
                     const dx = tx - sx, dy = ty - sy;
                     const dist = Math.sqrt(dx * dx + dy * dy);
                     const segments = Math.max(4, Math.floor(dist / 10));
@@ -982,8 +1037,8 @@ export class GameRenderer {
                             && (fx.targetX !== 0 || fx.targetY !== 0) && r === 0;
                     if (isThrow) {
                         // Chunky parabolic vial throw arc (800ms flight)
-                        const tx = fx.targetX * SCALE + offsetX;
-                        const ty = fx.targetY * SCALE + offsetY;
+                        const tx = this.worldToScreen(fx.targetX, fx.targetY, gameState).x;
+                        const ty = this.worldToScreen(fx.targetX, fx.targetY, gameState).y;
                         const pdx = tx - sx, pdy = ty - sy;
                         const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
                         const arcH = pdist * 0.5;
@@ -1055,8 +1110,8 @@ export class GameRenderer {
                             && (fx.targetX !== 0 || fx.targetY !== 0) && r === 0;
                     if (isThrow) {
                         // Parabolic trap throw arc (800ms flight)
-                        const tx = fx.targetX * SCALE + offsetX;
-                        const ty = fx.targetY * SCALE + offsetY;
+                        const tx = this.worldToScreen(fx.targetX, fx.targetY, gameState).x;
+                        const ty = this.worldToScreen(fx.targetX, fx.targetY, gameState).y;
                         const pdx = tx - sx, pdy = ty - sy;
                         const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
                         const arcH = pdist * 0.5;
@@ -1196,11 +1251,12 @@ export class GameRenderer {
         this.uiLayer.addChild(g);
     }
 
-    renderDamageTexts(gameState, offsetX, offsetY) {
+    renderDamageTexts(gameState, angle) {
         const TEXT_LIFE = 50; // must match game.js
         for (const dt of gameState.damageTexts) {
-            const sx = dt.x * SCALE + offsetX;
-            const sy = dt.y * SCALE + offsetY;
+            const screen = this.worldToScreen(dt.x, dt.y, gameState);
+            const sx = screen.x;
+            const sy = screen.y + (dt.screenOffY || 0);
             const alpha = Math.max(0, dt.life / TEXT_LIFE);
             const colorStr = '#' + dt.color.toString(16).padStart(6, '0');
             // Scale text slightly larger when fresh, shrink as it fades
@@ -1244,8 +1300,9 @@ export class GameRenderer {
      * @param {number} centerX - center X position (screen coords)
      * @param {number} topY - Y position above which icons are drawn
      */
-    _drawStatusIcons(effectIds, centerX, topY) {
+    _drawStatusIcons(effectIds, centerX, topY, container) {
         if (!effectIds || !effectIds.length) return;
+        const target = container || this.entityLayer;
         const active = [];
         for (const [eid, sym, color] of GameRenderer.STATUS_ICON_DEFS) {
             if (this._hasEffect(effectIds, eid)) active.push({ sym, color });
@@ -1259,7 +1316,6 @@ export class GameRenderer {
         const y = topY - iconSize - 2;
 
         for (const { sym, color } of active) {
-            // Background square
             const bg = new PIXI.Graphics();
             bg.beginFill(0x000000, 0.6);
             bg.drawRoundedRect(startX, y, iconSize, iconSize, 2);
@@ -1267,9 +1323,8 @@ export class GameRenderer {
             bg.beginFill(color, 0.9);
             bg.drawRoundedRect(startX + 1, y + 1, iconSize - 2, iconSize - 2, 1);
             bg.endFill();
-            this.entityLayer.addChild(bg);
+            target.addChild(bg);
 
-            // Symbol text
             const txt = new PIXI.Text(sym, {
                 fontSize: 9, fill: 0xFFFFFF,
                 fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
@@ -1278,7 +1333,7 @@ export class GameRenderer {
             txt.anchor.set(0.5, 0.5);
             txt.x = startX + iconSize / 2;
             txt.y = y + iconSize / 2;
-            this.entityLayer.addChild(txt);
+            target.addChild(txt);
 
             startX += iconSize + iconGap;
         }
@@ -1346,9 +1401,50 @@ export class GameRenderer {
     getWorldCoords(screenX, screenY, gameState) {
         const screenW = this.app.screen.width;
         const screenH = this.app.screen.height;
-        const worldX = (screenX - screenW / 2) / SCALE + gameState.cameraX;
-        const worldY = (screenY - screenH / 2) / SCALE + gameState.cameraY;
-        return { x: worldX, y: worldY };
+        const angle = gameState.cameraAngle || 0;
+
+        // Offset from screen center
+        const dx = screenX - screenW / 2;
+        const dy = screenY - screenH / 2;
+
+        // Un-rotate by camera angle to get world-space offset
+        const cos = Math.cos(-angle);
+        const sin = Math.sin(-angle);
+        const worldDx = (dx * cos - dy * sin) / SCALE;
+        const worldDy = (dx * sin + dy * cos) / SCALE;
+
+        // Pivot is at player center (cameraX/Y + half player size)
+        const localPlayer = gameState.getLocalPlayer();
+        const halfSize = (localPlayer?.size || PLAYER_SIZE) / 2;
+
+        return {
+            x: gameState.cameraX + halfSize + worldDx,
+            y: gameState.cameraY + halfSize + worldDy
+        };
+    }
+
+    /** Convert world position to screen position, accounting for camera rotation. */
+    worldToScreen(worldX, worldY, gameState) {
+        const screenW = this.app.screen.width;
+        const screenH = this.app.screen.height;
+        const angle = gameState.cameraAngle || 0;
+
+        // Pivot is at player center (cameraX/Y + half player size)
+        const localPlayer = gameState.getLocalPlayer();
+        const halfSize = (localPlayer?.size || PLAYER_SIZE) / 2;
+        const pivotX = gameState.cameraX + halfSize;
+        const pivotY = gameState.cameraY + halfSize;
+
+        const dx = (worldX - pivotX) * SCALE;
+        const dy = (worldY - pivotY) * SCALE;
+
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+
+        return {
+            x: screenW / 2 + dx * cos - dy * sin,
+            y: screenH / 2 + dx * sin + dy * cos
+        };
     }
 
     /**

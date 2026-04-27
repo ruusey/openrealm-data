@@ -48,7 +48,11 @@ export const DEFAULT_SETTINGS = {
             inventory: 'KeyR',
             menu: 'Escape',
             hpPotion: 'KeyZ',
-            mpPotion: 'KeyX'
+            mpPotion: 'KeyX',
+            rotateLeft: 'KeyQ',
+            rotateRight: 'KeyE',
+            resetCamera: 'KeyC',
+            lootPickup: 'KeyF'
         }
     },
     mobile: {
@@ -148,6 +152,7 @@ export class GameState {
         // Camera
         this.cameraX = 0;
         this.cameraY = 0;
+        this.cameraAngle = 0; // radians, 0 = north-up. Persists across realm transitions and death.
 
         // Realm transition
         this.awaitingRealmTransition = false;
@@ -1134,9 +1139,10 @@ export class GameState {
             }
         }
 
-        // Update damage texts — float upward and fade out
+        // Update damage texts — float upward in screen space and fade out
         for (let i = this.damageTexts.length - 1; i >= 0; i--) {
-            this.damageTexts[i].y -= 1.0; // slower float (was 1.4) since lifetime is longer
+            if (this.damageTexts[i].screenOffY === undefined) this.damageTexts[i].screenOffY = 0;
+            this.damageTexts[i].screenOffY -= 1.0; // float up in screen space
             this.damageTexts[i].life--;
             if (this.damageTexts[i].life <= 0) this.damageTexts.splice(i, 1);
         }

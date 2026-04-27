@@ -1021,7 +1021,11 @@ const KEYBIND_ROWS = [
     { action: 'inventory', label: 'Open Inventory',  locked: true  },
     { action: 'menu',      label: 'Open Menu',       locked: true  },
     { action: 'hpPotion',  label: 'Use HP Potion',   locked: false },
-    { action: 'mpPotion',  label: 'Use MP Potion',   locked: false }
+    { action: 'mpPotion',  label: 'Use MP Potion',   locked: false },
+    { action: 'rotateLeft',  label: 'Rotate Camera Left',  locked: false },
+    { action: 'rotateRight', label: 'Rotate Camera Right', locked: false },
+    { action: 'resetCamera', label: 'Reset Camera',        locked: false },
+    { action: 'lootPickup',  label: 'Pick Up Loot',        locked: false }
 ];
 
 function formatKeyCode(code) {
@@ -1514,6 +1518,34 @@ function sampleDirFlags() {
     return flags;
 }
 
+// Camera rotation speed (radians/sec) — continuous while Q/E held
+const CAM_ROTATE_SPEED = Math.PI; // 180 deg/sec
+
+// Rotate screen-space direction flags to world-space, accounting for camera angle
+function rotateDirectionFlags(flags, angle) {
+    if (flags === 0 || angle === 0) return flags;
+    let dx = 0, dy = 0;
+    if (flags & 0x01) dy -= 1; // up
+    if (flags & 0x02) dy += 1; // down
+    if (flags & 0x04) dx -= 1; // left
+    if (flags & 0x08) dx += 1; // right
+
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
+
+    let newFlags = 0;
+    if (ry < -0.38) newFlags |= 0x01; // up
+    if (ry > 0.38) newFlags |= 0x02;  // down
+    if (rx < -0.38) newFlags |= 0x04; // left
+    if (rx > 0.38) newFlags |= 0x08;  // right
+
+    if ((newFlags & 0x01) && (newFlags & 0x02)) newFlags &= ~(0x01 | 0x02);
+    if ((newFlags & 0x04) && (newFlags & 0x08)) newFlags &= ~(0x04 | 0x08);
+    return newFlags;
+}
+
 // --- Input Processing ---
 function processInput(dt) {
     const local = game.getLocalPlayer();
@@ -1521,8 +1553,40 @@ function processInput(dt) {
 
     game.removeExpiredEffects();
 
-    // Sample keyboard state once per render frame
-    let dirFlags = sampleDirFlags();
+    // Camera rotation — continuous while held, snaps to nearest 45° on release
+    const b = (game.settings && game.settings.controls && game.settings.controls.bindings) || {};
+    const rotLeftKey = b.rotateLeft || 'KeyQ';
+    const rotRightKey = b.rotateRight || 'KeyE';
+    const resetCamKey = b.resetCamera || 'KeyC';
+    const isRotating = (input.isKeyDown(rotLeftKey) || input.isKeyDown(rotRightKey))
+        && !input.chatMode && !input.menuOpen;
+    if (input.isKeyDown(rotLeftKey) && !input.chatMode && !input.menuOpen) {
+        game.cameraAngle += CAM_ROTATE_SPEED * dt;
+    }
+    if (input.isKeyDown(rotRightKey) && !input.chatMode && !input.menuOpen) {
+        game.cameraAngle -= CAM_ROTATE_SPEED * dt;
+    }
+    if (input.isKeyDown(resetCamKey) && !input.chatMode && !input.menuOpen) {
+        input.keys[resetCamKey] = false;
+        game.cameraAngle = 0;
+    }
+    // Snap to nearest 45° when not actively rotating (so movement aligns with visuals)
+    if (!isRotating && game.cameraAngle !== 0) {
+        const SNAP = Math.PI / 4; // 45 degrees
+        const target = Math.round(game.cameraAngle / SNAP) * SNAP;
+        // Normalize near-zero to exactly zero
+        const snapTarget = Math.abs(target) < 0.01 ? 0 : target;
+        const diff = snapTarget - game.cameraAngle;
+        if (Math.abs(diff) > 0.001) {
+            game.cameraAngle += diff * Math.min(1, dt * 12); // smooth snap
+        } else {
+            game.cameraAngle = snapTarget;
+        }
+    }
+
+    // Sample screen-space direction, then rotate to world-space for server
+    const screenDirFlags = sampleDirFlags();
+    let dirFlags = rotateDirectionFlags(screenDirFlags, -game.cameraAngle);
     if (game.hasEffect(StatusEffect.PARALYZED)) dirFlags = 0;
 
     // Run fixed-timestep simulation ticks (64Hz, matching server exactly)
@@ -1581,9 +1645,10 @@ function processInput(dt) {
         local._renderY = local.pos.y;
     }
 
-    // Store dirFlags for rendering (facing direction, animation)
-    const up = !!(dirFlags & 0x01), down = !!(dirFlags & 0x02);
-    const left = !!(dirFlags & 0x04), right = !!(dirFlags & 0x08);
+    // Store screen-space flags for rendering (facing direction, animation)
+    // Use screenDirFlags so sprite faces the screen-relative direction
+    const up = !!(screenDirFlags & 0x01), down = !!(screenDirFlags & 0x02);
+    const left = !!(screenDirFlags & 0x04), right = !!(screenDirFlags & 0x08);
     if (left) lastXDir = 3;
     else if (right) lastXDir = 2;
     else lastXDir = null;
@@ -1763,17 +1828,26 @@ function processInput(dt) {
         }
     }
 
-    // Number keys 1-8 = Quick use inventory items in the active bag
+    // Number keys 1-8 = Smart inventory action (consume or equip-swap)
     for (let n = 1; n <= 8; n++) {
         const key = `Digit${n}`;
-        if (input.isKeyDown(key) && !input.chatMode) {
+        if (input.isKeyDown(key) && !input.chatMode && !input.menuOpen) {
             input.keys[key] = false;
             const bagStart = activeBag === 1 ? 4 : 12;
             const slotIdx = bagStart + (n - 1);
             const item = game.inventory[slotIdx];
-            if (item && item.itemId >= 0 && item.consumable) {
-                network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
-                lastInvKey = '';
+            if (item && item.itemId >= 0) {
+                if (item.consumable) {
+                    // Use consumable
+                    network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
+                    lastInvKey = '';
+                } else if (item.targetSlot >= 0 && item.targetSlot <= 3) {
+                    // Equipable item — check class compatibility then swap
+                    if (item.targetClass < 0 || item.targetClass === game.classId) {
+                        network.sendMoveItem(game.playerId, item.targetSlot, slotIdx, false, false);
+                        lastInvKey = '';
+                    }
+                }
             }
         }
     }
@@ -1803,9 +1877,10 @@ function processInput(dt) {
         }
     }
 
-    // E = Pick up from nearest loot container (first item to first empty slot)
-    if (input.isKeyDown('KeyE')) {
-        input.keys['KeyE'] = false;
+    // F = Pick up from nearest loot container (first item to first empty slot)
+    const lootKey = b.lootPickup || 'KeyF';
+    if (input.isKeyDown(lootKey) && !input.chatMode && !input.menuOpen) {
+        input.keys[lootKey] = false;
         const loot = game.getNearbyLootContainer(64);
         if (loot && loot.items) {
             for (let i = 0; i < loot.items.length; i++) {
@@ -2251,15 +2326,27 @@ function updatePotionUI() {
     }
 }
 
-// Double-click to consume potions
-document.getElementById('hp-potion-slot')?.addEventListener('dblclick', () => {
+// Double-click to consume potions, single-click to drop one
+document.getElementById('hp-potion-slot')?.addEventListener('dblclick', (e) => {
+    e.preventDefault();
     if (game.hpPotions > 0) {
         network.sendMoveItem(game.playerId, -1, 28, false, true);
     }
 });
-document.getElementById('mp-potion-slot')?.addEventListener('dblclick', () => {
+document.getElementById('mp-potion-slot')?.addEventListener('dblclick', (e) => {
+    e.preventDefault();
     if (game.mpPotions > 0) {
         network.sendMoveItem(game.playerId, -1, 29, false, true);
+    }
+});
+document.getElementById('hp-potion-slot')?.addEventListener('click', (e) => {
+    if (game.hpPotions > 0) {
+        network.sendMoveItem(game.playerId, -1, 28, true, false);
+    }
+});
+document.getElementById('mp-potion-slot')?.addEventListener('click', (e) => {
+    if (game.mpPotions > 0) {
+        network.sendMoveItem(game.playerId, -1, 29, true, false);
     }
 });
 
