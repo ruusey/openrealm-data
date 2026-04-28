@@ -6017,5 +6017,34 @@
 		"fameBonus": 0,
 		"category": "dye",
 		"dyeId": 8
+	},
+	{
+		"itemId": 829,
+		"row": 26,
+		"col": 8,
+		"spriteKey": "rotmg-tiles-all.png",
+		"name": "Soulrot Vial",
+		"description": "A vile concoction. Throw a venom cloud that bleeds enemies dry over 10 seconds.",
+		"stats": {
+			"wis": 4,
+			"def": -4
+		},
+		"damage": {
+			"projectileGroupId": -1,
+			"min": 1000,
+			"max": 1000
+		},
+		"effect": {
+			"self": false,
+			"effectId": 8,
+			"duration": 10000,
+			"cooldownDuration": 5000,
+			"mpCost": 80
+		},
+		"consumable": false,
+		"tier": -1,
+		"targetSlot": 1,
+		"targetClass": 7,
+		"fameBonus": 5
 	}
 ]

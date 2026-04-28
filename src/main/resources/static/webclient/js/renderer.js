@@ -1269,36 +1269,80 @@ export class GameRenderer {
                     }
                     break;
 
-                case 1: // VAMPIRISM — inward-sucking purple/red particles
-                    for (let i = 0; i < 12; i++) {
-                        const a = (i / 12) * Math.PI * 2 + elapsed * 0.003;
-                        const dist = r * (1.0 - progress); // particles move inward
+                case 1: { // VAMPIRISM — necromancer life-drain spiral
+                    // Outer translucent boundary so the drain area is visible.
+                    g.lineStyle(3, 0x802080, alpha * 0.9);
+                    g.drawCircle(sx, sy, r);
+                    g.beginFill(0x4a0a4a, alpha * 0.18);
+                    g.drawCircle(sx, sy, r);
+                    g.endFill();
+                    g.lineStyle(0);
+                    // Twin-spiral inward-pulling streams. Two phase-offset rings
+                    // of particles spiraling toward center for clear visual flow.
+                    const vampParticles = 24;
+                    for (let i = 0; i < vampParticles; i++) {
+                        const a = (i / vampParticles) * Math.PI * 2 + elapsed * 0.005;
+                        const dist = r * (1.0 - progress) * (0.4 + 0.6 * ((i % 2) === 0 ? 1 : 0.65));
                         const px = sx + Math.cos(a) * dist;
                         const py = sy + Math.sin(a) * dist;
-                        g.beginFill(0xcc40cc, alpha * 0.6);
-                        g.drawCircle(px, py, 2 + (1 - progress) * 2);
+                        // Trail dot — bright magenta
+                        g.beginFill(0xff60ff, alpha * 0.85);
+                        g.drawCircle(px, py, 4 + (1 - progress) * 3);
+                        g.endFill();
+                        // Outer dim halo for blob feel
+                        g.beginFill(0xcc20cc, alpha * 0.35);
+                        g.drawCircle(px, py, 7 + (1 - progress) * 4);
                         g.endFill();
                     }
-                    // Inner glow
-                    g.beginFill(0xff4040, alpha * 0.15);
-                    g.drawCircle(sx, sy, r * 0.3 * (1 - progress));
+                    // Throbbing core glow — red blood pulse.
+                    const corePulse = 0.6 + 0.4 * Math.sin(elapsed * 0.02);
+                    g.beginFill(0xff2030, alpha * 0.5 * corePulse);
+                    g.drawCircle(sx, sy, r * 0.35 * (1 - progress * 0.6));
+                    g.endFill();
+                    g.beginFill(0xffa0a0, alpha * 0.7);
+                    g.drawCircle(sx, sy, r * 0.18 * (1 - progress * 0.5));
                     g.endFill();
                     break;
+                }
 
-                case 2: // STASIS_FIELD — frozen blue/white ring
-                    g.lineStyle(3, 0x80c0ff, alpha * 0.8);
+                case 2: { // STASIS_FIELD — mystic AoE freeze
+                    // Frosted area fill so the field is unmistakable.
+                    g.beginFill(0x6090d0, alpha * 0.22);
                     g.drawCircle(sx, sy, r);
-                    g.lineStyle(1, 0xffffff, alpha * 0.4);
-                    g.drawCircle(sx, sy, r * 0.85);
+                    g.endFill();
+                    // Outer glow ring — chunky, bright cyan-blue.
+                    g.lineStyle(6, 0x60a0ff, alpha * 0.55);
+                    g.drawCircle(sx, sy, r);
+                    g.lineStyle(4, 0xb0e0ff, alpha * 0.95);
+                    g.drawCircle(sx, sy, r);
+                    g.lineStyle(2, 0xffffff, alpha * 0.7);
+                    g.drawCircle(sx, sy, r * 0.92);
                     g.lineStyle(0);
-                    // Ice crystal particles
-                    for (let i = 0; i < 6; i++) {
-                        const a = (i / 6) * Math.PI * 2 + elapsed * 0.002;
-                        g.beginFill(0xc0e0ff, alpha * 0.5);
-                        g.drawRect(sx + Math.cos(a) * r * 0.7 - 2, sy + Math.sin(a) * r * 0.7 - 2, 4, 4);
+                    // Twelve rotating ice shards on the edge — diamond-shaped
+                    // for that "frozen crystal" feel.
+                    for (let i = 0; i < 12; i++) {
+                        const a = (i / 12) * Math.PI * 2 + elapsed * 0.003;
+                        const cx = sx + Math.cos(a) * r * 0.78;
+                        const cy = sy + Math.sin(a) * r * 0.78;
+                        // Glow halo
+                        g.beginFill(0xa0d0ff, alpha * 0.35);
+                        g.drawCircle(cx, cy, 7);
+                        g.endFill();
+                        // Crystal body
+                        g.beginFill(0xe0f0ff, alpha * 0.95);
+                        g.drawPolygon([cx, cy - 5, cx + 4, cy, cx, cy + 5, cx - 4, cy]);
+                        g.endFill();
+                    }
+                    // Inner snowflake bursts — twinkle
+                    for (let i = 0; i < 8; i++) {
+                        const a = (i / 8) * Math.PI * 2 - elapsed * 0.004;
+                        const dr = r * (0.25 + 0.4 * Math.abs(Math.sin(elapsed * 0.005 + i)));
+                        g.beginFill(0xffffff, alpha * 0.6);
+                        g.drawCircle(sx + Math.cos(a) * dr, sy + Math.sin(a) * dr, 2);
                         g.endFill();
                     }
                     break;
+                }
 
                 case 3: { // CHAIN_LIGHTNING — electric arc between two points
                     const _ts = this.worldToScreen(fx.targetX, fx.targetY, gameState);
@@ -1408,19 +1452,46 @@ export class GameRenderer {
                             g.endFill();
                         }
                     } else {
-                        // AoE poison splash cloud
-                        g.lineStyle(2, 0x40cc40, alpha * 0.7);
-                        g.drawCircle(sx, sy, r * (0.3 + progress * 0.7));
-                        g.lineStyle(1, 0x30aa30, alpha * 0.4);
-                        g.drawCircle(sx, sy, r * (0.5 + progress * 0.3));
+                        // AoE poison splash — chunky toxic cloud, expands fast then
+                        // lingers. Filled translucent body + thick outline + drifting
+                        // bubbles so it reads at a glance.
+                        const expand = 0.4 + progress * 0.6;
+                        const cloudR = r * expand;
+                        // Soft outer halo
+                        g.beginFill(0x408a30, alpha * 0.25);
+                        g.drawCircle(sx, sy, cloudR * 1.1);
+                        g.endFill();
+                        // Main cloud body — saturated green fill
+                        g.beginFill(0x4cc530, alpha * 0.4);
+                        g.drawCircle(sx, sy, cloudR);
+                        g.endFill();
+                        // Thick toxic-green border
+                        g.lineStyle(4, 0x60ff40, alpha * 0.9);
+                        g.drawCircle(sx, sy, cloudR);
+                        g.lineStyle(2, 0xa0ff70, alpha * 0.7);
+                        g.drawCircle(sx, sy, cloudR * 0.85);
                         g.lineStyle(0);
-                        for (let i = 0; i < 10; i++) {
-                            const a = (i / 10) * Math.PI * 2 + elapsed * 0.003;
-                            const dist2 = r * 0.5 * (1.0 - progress * 0.3);
-                            g.beginFill(0x30aa30, alpha * 0.5);
-                            g.drawCircle(sx + Math.cos(a) * dist2, sy + Math.sin(a) * dist2, 3);
+                        // Drifting toxic bubbles — large, varied positions
+                        for (let i = 0; i < 14; i++) {
+                            const a = (i / 14) * Math.PI * 2 + elapsed * 0.003;
+                            const wobble = Math.sin(elapsed * 0.005 + i) * 0.15;
+                            const dist2 = cloudR * (0.45 + wobble);
+                            const bx = sx + Math.cos(a) * dist2;
+                            const by = sy + Math.sin(a) * dist2;
+                            // Halo
+                            g.beginFill(0x80e060, alpha * 0.4);
+                            g.drawCircle(bx, by, 7);
+                            g.endFill();
+                            // Bubble core
+                            g.beginFill(0xc0ff80, alpha * 0.85);
+                            g.drawCircle(bx, by, 4);
                             g.endFill();
                         }
+                        // Central skull-fume burst — bright pulse
+                        const fumePulse = 0.5 + 0.5 * Math.sin(elapsed * 0.012);
+                        g.beginFill(0x60ff40, alpha * 0.7 * fumePulse);
+                        g.drawCircle(sx, sy, cloudR * 0.25);
+                        g.endFill();
                     }
                     break;
                 }

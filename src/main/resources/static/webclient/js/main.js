@@ -2394,6 +2394,14 @@ let isMouseOverHud = false; // Prevents shooting/ability when hovering over UI
 let dragSlot = -1; // Slot being dragged (-1 = none)
 let dragEl = null; // Floating drag element
 let _dragOverBag = 0; // Target bag number hovered during drag (0 = none)
+// "Pending" drag — set on mousedown over a populated slot, promoted to a real
+// drag (dragSlot/dragEl) once the cursor moves past DRAG_THRESHOLD_PX. This
+// keeps quick clicks (single + double) from triggering a drag at all, so the
+// dblclick path for consumables fires reliably.
+let pendingDragSlot = -1;
+let pendingDragItem = null;
+let pendingDragX = 0, pendingDragY = 0;
+const DRAG_THRESHOLD_PX = 5;
 let lastLootKey = '';
 let lastTouchTime = 0; // Tracks recent touch events to filter synthetic mouse events
 // Sprite data URL cache to avoid re-extracting every frame
@@ -2942,16 +2950,20 @@ function createSlot(item, label, slotIdx, isLoot = false) {
     // Right click (desktop) = drop
     div.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); onSlotRightClick(slotIdx, item); });
 
-    // Drag start (desktop only - skip on touch devices to not interfere with taps)
+    // Mousedown: don't commit to a drag yet — just record that one MIGHT
+    // be starting. The document-level mousemove handler promotes this to a
+    // real drag once the cursor moves > DRAG_THRESHOLD_PX. This way, quick
+    // clicks and double-clicks don't trigger a drag, and the click /
+    // dblclick handlers fire normally.
     div.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; // left click only
-        // Skip if this is a touch-originated mouse event
         if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
-        // Fallback: skip if we've seen a recent touch event (within 500ms)
         if (Date.now() - lastTouchTime < 500) return;
         if (item && item.itemId >= 0) {
-            e.preventDefault();
-            startDrag(slotIdx, item, e);
+            pendingDragSlot = slotIdx;
+            pendingDragItem = item;
+            pendingDragX = e.clientX;
+            pendingDragY = e.clientY;
         }
     });
 
@@ -3180,8 +3192,26 @@ function cleanupDrag() {
     document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('drag-hover'));
 }
 
-document.addEventListener('mousemove', moveDrag);
-document.addEventListener('mouseup', endDrag);
+document.addEventListener('mousemove', (e) => {
+    // Promote a pending drag to a real drag once the cursor moves past the
+    // threshold. Below that we treat it as a click so dblclick consume can
+    // fire without a drag flickering on every click.
+    if (pendingDragSlot >= 0 && dragSlot < 0) {
+        const dx = e.clientX - pendingDragX;
+        const dy = e.clientY - pendingDragY;
+        if (dx * dx + dy * dy >= DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
+            startDrag(pendingDragSlot, pendingDragItem, e);
+            pendingDragSlot = -1;
+            pendingDragItem = null;
+        }
+    }
+    moveDrag(e);
+});
+document.addEventListener('mouseup', (e) => {
+    pendingDragSlot = -1;
+    pendingDragItem = null;
+    endDrag(e);
+});
 
 // Touch event handlers for drag operations (ensures cleanup on mobile)
 document.addEventListener('touchmove', (e) => {
