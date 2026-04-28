@@ -347,6 +347,39 @@ async function ensureItemDefs() {
     return _graveyardItemDefs;
 }
 
+// Stateless level/fame computation from raw xp. Mirrors GameState.getPlayerLevel
+// / getBaseFame so the character-select cards can display the same lvl + xp/fame
+// the in-game HUD and leaderboard do, without needing a player instance.
+let _expMapCache = null;
+function getExpMap() {
+    if (_expMapCache) return _expMapCache;
+    if (!game.expLevels || !game.expLevels.levelExperienceMap) return null;
+    const map = {};
+    let maxLvl = 1, maxExp = 0;
+    for (const [lvl, range] of Object.entries(game.expLevels.levelExperienceMap)) {
+        const [min, max] = range.split('-').map(Number);
+        const l = parseInt(lvl);
+        map[l] = { min, max };
+        if (l > maxLvl) maxLvl = l;
+        if (max > maxExp) maxExp = max;
+    }
+    _expMapCache = { map, maxLvl, maxExp };
+    return _expMapCache;
+}
+function computeLevelFame(xp) {
+    const exp = Number(xp) || 0;
+    const m = getExpMap();
+    if (!m) return { level: 1, fame: 0, isFame: false };
+    if (exp > m.maxExp) {
+        return { level: m.maxLvl + 1, fame: Math.floor((exp - m.maxExp) / 2500), isFame: true };
+    }
+    let level = 1;
+    for (const [lvl, range] of Object.entries(m.map)) {
+        if (range.min <= exp && range.max >= exp) level = parseInt(lvl);
+    }
+    return { level, fame: 0, isFame: false };
+}
+
 function showCharacterSelect() {
     showScreen('charselect');
     selectedCharacter = null;
@@ -380,11 +413,19 @@ function showCharacterSelect() {
     if (aliveChars.length === 0) {
         listEl.innerHTML = '<p style="color:#887868">No characters yet. Create one below!</p>';
     } else {
+        // Item defs are needed for the hover tooltip's equipment names/sprites.
+        // Fire and forget — the tooltip handler reads from game.itemData /
+        // _graveyardItemDefs at render time, so a delayed populate is fine.
+        ensureItemDefs();
         for (const char of aliveChars) {
             const card = document.createElement('div');
             card.className = 'char-card';
             const className = ALL_CLASSES[char.characterClass] || `Class ${char.characterClass}`;
             const stats = char.stats || {};
+            const lf = computeLevelFame(stats.xp);
+            const xpFameLabel = lf.isFame
+                ? `Lv 20 · Fame ${lf.fame.toLocaleString()}`
+                : `Lv ${lf.level} · XP ${(Number(stats.xp) || 0).toLocaleString()}`;
             const iconDiv = document.createElement('div');
             iconDiv.className = 'char-icon';
             const classId = char.characterClass || 0;
@@ -396,13 +437,13 @@ function showCharacterSelect() {
             const infoDiv = document.createElement('div');
             infoDiv.className = 'char-info';
             infoDiv.innerHTML = `
-                <div class="char-name">${className}</div>
+                <div class="char-name">${className} <span class="char-level">${xpFameLabel}</span></div>
                 <div class="char-details">
                     HP: ${stats.hp ?? '?'} | MP: ${stats.mp ?? '?'} |
                     ATT: ${stats.att ?? '?'} | DEF: ${stats.def ?? '?'} |
                     SPD: ${stats.spd ?? '?'} | DEX: ${stats.dex ?? '?'}
                 </div>
-                <div class="char-details" style="font-size:10px;color:#665848">${char.characterUuid}</div>
+                <div class="char-details char-uuid">${char.characterUuid}</div>
             `;
             card.appendChild(iconDiv);
             card.appendChild(infoDiv);
@@ -413,6 +454,22 @@ function showCharacterSelect() {
                 document.getElementById('play-btn').disabled = false;
                 document.getElementById('delete-char-btn').disabled = false;
             });
+
+            // Hover tooltip — same data and styling as the leaderboard rows.
+            // Build a leaderboard-shaped entry so showEquipmentTooltip works
+            // without changes. Mobile (no hover) gets the lvl + xp/fame inline
+            // on the card already, plus a tap-to-toggle handler below.
+            const entryShape = {
+                accountName: account.accountName || 'You',
+                className: className,
+                characterClass: classId,
+                level: lf.level,
+                fame: lf.fame,
+                stats: stats,
+                equipment: char.items || []
+            };
+            card.addEventListener('mouseenter', (e) => showEquipmentTooltip(e, entryShape));
+            card.addEventListener('mouseleave', () => hideEquipmentTooltip());
             listEl.appendChild(card);
         }
     }
@@ -586,6 +643,18 @@ function showEquipmentTooltip(event, entry) {
     }
     const slotNames = ['Weapon', 'Ability', 'Armor', 'Ring'];
     let html = `<div class="lb-tooltip-title">${entry.accountName}'s ${entry.className}</div>`;
+    // Optional second header line: Lv + XP/Fame. Used by the character-select
+    // card hover tooltip; leaderboard rows already show this info inline.
+    const isFame = (entry.fame || 0) > 0;
+    const xpVal = entry.stats && entry.stats.xp != null ? Number(entry.stats.xp) : null;
+    if (entry.level != null || isFame || xpVal != null) {
+        const lvlPart = isFame ? 'Lv 20' : (entry.level != null ? `Lv ${entry.level}` : '');
+        const progPart = isFame
+            ? `Fame ${(entry.fame || 0).toLocaleString()}`
+            : (xpVal != null ? `XP ${xpVal.toLocaleString()}` : '');
+        const sep = lvlPart && progPart ? ' · ' : '';
+        html += `<div class="lb-tooltip-sub">${lvlPart}${sep}${progPart}</div>`;
+    }
     html += '<div class="lb-tooltip-equip">';
     for (let i = 0; i < 4; i++) {
         const equip = entry.equipment.find(e => e.slotIdx === i);

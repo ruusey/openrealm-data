@@ -23,6 +23,13 @@ html, body {
 
 .screen { display: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
 .screen.active { display: flex; align-items: center; justify-content: center; overflow-y: auto; }
+/* body has touch-action: none for the game canvas. The login + character
+   select screens need to scroll on mobile, so re-enable vertical pan and
+   momentum scrolling for them specifically. */
+#login-screen.active, #charselect-screen.active {
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+}
 
 /* Login */
 .login-box, .charselect-box {
@@ -74,25 +81,28 @@ button.secondary:hover { background: #4a3a48; }
 .discord-link svg { flex-shrink: 0; }
 
 /* Character Select */
-.charselect-box { width: 560px; max-height: 90vh; overflow-y: auto; }
+.charselect-box { width: 640px; max-height: 92vh; overflow-y: auto; padding: 32px; }
 .charselect-box h2 { color: #c8a86e; margin-bottom: 20px; }
-.charselect-box h3 { color: #a89888; font-size: 14px; margin: 12px 0 8px; }
+.charselect-box h3 { color: #a89888; font-size: 15px; margin: 16px 0 10px; }
 .charselect-tabs {
-    display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #3a2a38;
+    display: flex; gap: 0; margin-bottom: 18px; border-bottom: 2px solid #3a2a38;
 }
 .tab-btn {
-    flex: 1; padding: 10px 16px; background: transparent; border: none;
-    color: #887868; font-size: 14px; font-weight: 600; cursor: pointer;
+    flex: 1; padding: 14px 16px; background: transparent; border: none;
+    color: #887868; font-size: 15px; font-weight: 600; cursor: pointer;
     border-bottom: 2px solid transparent; margin-bottom: -2px;
     transition: color 0.15s, border-color 0.15s;
 }
 .tab-btn:hover { color: #c8a86e; }
 .tab-btn.active { color: #c8a86e; border-bottom-color: #c8a86e; }
-#graveyard-list { max-height: 340px; overflow-y: auto; margin-bottom: 12px; }
+/* Inner scroll regions: capped on desktop (so the box doesn't get unwieldy),
+   but on mobile the parent .charselect-box is the single scroll container —
+   nested scroll caps make it nearly impossible to drag-scroll. */
+#graveyard-list { max-height: 360px; overflow-y: auto; margin-bottom: 14px; }
 #graveyard-list .char-card { cursor: default; border-color: #3a2030; }
 #graveyard-list .char-card:hover { border-color: #5a3040; }
 #graveyard-list .char-card .char-name { color: #a04040; }
-.grave-date { font-size: 10px; color: #804040; margin-top: 2px; }
+.grave-date { font-size: 11px; color: #804040; margin-top: 4px; }
 .grave-equip { display: flex; gap: 4px; margin-top: 4px; }
 .grave-equip-slot {
     width: 24px; height: 24px; background: #2a2030; border: 1px solid #3a2a38;
@@ -100,69 +110,76 @@ button.secondary:hover { background: #4a3a48; }
     align-items: center; justify-content: center; overflow: hidden;
 }
 .grave-equip-slot img { width: 100%; height: 100%; image-rendering: pixelated; }
-#char-list { max-height: 280px; overflow-y: auto; margin-bottom: 12px; }
-.char-actions { display: flex; gap: 8px; margin-bottom: 8px; }
-.char-actions button { flex: 1; }
+#char-list { max-height: 320px; overflow-y: auto; margin-bottom: 14px; }
+.char-actions { display: flex; gap: 10px; margin-bottom: 10px; }
+.char-actions button { flex: 1; padding: 14px; font-size: 15px; }
 button.danger { background: #a04040; color: #fff; }
 button.danger:hover { background: #b05050; }
 button.danger:disabled { background: #5a3a3a; color: #887868; }
-button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
-.char-create { border-top: 1px solid #3a2a38; padding-top: 8px; }
+button.small { padding: 8px 14px; font-size: 13px; width: auto; margin: 0; }
+.char-create { border-top: 1px solid #3a2a38; padding-top: 12px; }
 #class-picker {
     display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 4px; margin-bottom: 8px;
+    gap: 6px; margin-bottom: 12px;
 }
 .class-option {
-    padding: 6px 4px; text-align: center;
+    padding: 10px 6px; text-align: center;
     background: #1a1218; border: 2px solid #3a2a38;
     border-radius: 4px; cursor: pointer;
-    font-size: 11px; color: #a89888;
+    font-size: 12px; color: #a89888;
     transition: border-color 0.15s;
+    min-height: 44px;
+    display: flex; align-items: center; justify-content: center;
 }
 .class-option:hover { border-color: #6a5a68; }
 .class-option.selected { border-color: #c8a86e; color: #e0d8c8; background: #2a2030; }
 .password-section {
-    border-top: 1px solid #3a2a38; padding-top: 8px; margin-top: 8px;
+    border-top: 1px solid #3a2a38; padding-top: 12px; margin-top: 12px;
 }
 .password-section summary {
-    color: #887868; font-size: 13px; cursor: pointer; margin-bottom: 8px;
+    color: #887868; font-size: 14px; cursor: pointer; margin-bottom: 10px;
+    padding: 6px 0;
 }
 .password-section summary:hover { color: #c8a86e; }
-.password-section .form-group { margin-bottom: 6px; }
-.password-section input { padding: 7px 10px; font-size: 13px; }
+.password-section .form-group { margin-bottom: 8px; }
+.password-section input { padding: 9px 12px; font-size: 14px; }
 #pw-status { font-size: 12px; min-height: 14px; }
 #pw-status.success { color: #40a040; }
 .chest-section {
     display: flex; align-items: center; justify-content: space-between;
-    border-top: 1px solid #3a2a38; padding-top: 10px; margin-top: 10px;
-    font-size: 13px; color: #887868;
+    border-top: 1px solid #3a2a38; padding-top: 14px; margin-top: 14px;
+    font-size: 14px; color: #887868;
 }
 .char-card {
     background: #1a1218;
     border: 2px solid #3a2a38;
     border-radius: 6px;
-    padding: 14px 16px;
-    margin-bottom: 8px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 14px;
-    transition: border-color 0.15s;
+    gap: 16px;
+    transition: border-color 0.15s, background 0.15s;
 }
 .char-card:hover { border-color: #6a5a68; }
 .char-card.selected { border-color: #c8a86e; background: #2a2030; }
 .char-card .char-icon {
-    width: 48px; height: 48px;
+    width: 52px; height: 52px;
     background: #2a2030;
     border-radius: 4px;
     image-rendering: pixelated;
     display: flex; align-items: center; justify-content: center;
     overflow: hidden;
     font-size: 24px;
+    flex-shrink: 0;
 }
-.char-card .char-info { text-align: left; flex: 1; }
-.char-card .char-name { font-weight: 600; font-size: 15px; }
-.char-card .char-details { font-size: 12px; color: #887868; margin-top: 2px; }
+.char-card .char-info { text-align: left; flex: 1; min-width: 0; }
+.char-card .char-name { font-weight: 600; font-size: 16px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.char-card .char-level { font-size: 12px; color: #aa8844; font-weight: normal; letter-spacing: 0.5px; }
+.char-card .char-details { font-size: 13px; color: #887868; margin-top: 4px; }
+.char-card .char-uuid { font-size: 10px; color: #665848; margin-top: 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Game */
 #game-screen { flex-direction: column; }
@@ -1073,27 +1090,38 @@ body.forge-open #ground-loot-panel { z-index: 200; }
     #interact-prompt { bottom: 56px; padding: 4px 8px; gap: 6px; }
     #portal-name { font-size: 10px; }
     #portal-enter-btn { padding: 3px 8px; font-size: 10px; }
-    .login-box, .charselect-box { width: 90vw; max-width: 400px; padding: 16px; }
-    .charselect-box { max-height: 85vh; overflow-y: auto; }
-    .charselect-box h2 { font-size: 18px; margin-bottom: 10px; }
-    #char-list { max-height: 120px; }
-    #graveyard-list { max-height: 160px; }
-    .tab-btn { font-size: 12px; padding: 8px 10px; }
-    .char-card { padding: 8px 10px; gap: 8px; }
-    .char-card .char-icon { width: 32px; height: 32px; font-size: 16px; }
-    .char-card .char-name { font-size: 13px; }
-    .char-card .char-details { font-size: 10px; }
-    .char-create { padding-top: 6px; }
-    .char-create h3 { font-size: 12px; margin: 6px 0 4px; }
-    #class-picker { grid-template-columns: repeat(4, 1fr); gap: 3px; }
-    .class-option { padding: 4px 2px; font-size: 9px; }
-    .char-actions { gap: 4px; }
-    .char-actions button { padding: 8px; font-size: 12px; }
-    .chest-section { font-size: 11px; padding-top: 6px; margin-top: 6px; }
-    .password-section summary { font-size: 11px; }
-    .password-section input { padding: 5px 8px; font-size: 11px; }
-    button.small { padding: 5px 8px; font-size: 10px; }
-    #logout-btn { padding: 8px; font-size: 12px; }
+    .login-box, .charselect-box { width: 94vw; max-width: 480px; padding: 20px; }
+    /* On mobile the box itself is the single scroll container — drop nested
+       scroll caps so dragging anywhere in the box (including on cards) pans
+       the box. Previously #char-list was capped at 120px which made the
+       scroll target tiny and fought with the outer scroll. */
+    .charselect-box { max-height: 92vh; overflow-y: auto; }
+    .charselect-box h2 { font-size: 20px; margin-bottom: 12px; }
+    #char-list { max-height: none; overflow-y: visible; }
+    #graveyard-list { max-height: none; overflow-y: visible; }
+    .leaderboard-section { max-height: none; overflow-y: visible; }
+    .tab-btn { font-size: 14px; padding: 14px 12px; min-height: 44px; }
+    .char-card { padding: 14px 14px; gap: 12px; margin-bottom: 10px; min-height: 64px; }
+    .char-card .char-icon { width: 44px; height: 44px; font-size: 20px; }
+    .char-card .char-name { font-size: 15px; }
+    .char-card .char-level { font-size: 11px; }
+    .char-card .char-details { font-size: 12px; }
+    .char-card .char-uuid { font-size: 9px; }
+    .char-create { padding-top: 10px; }
+    .char-create h3 { font-size: 14px; margin: 10px 0 8px; }
+    #class-picker { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .class-option { padding: 10px 4px; font-size: 11px; min-height: 44px; }
+    .char-actions { gap: 8px; }
+    .char-actions button { padding: 14px; font-size: 14px; min-height: 48px; }
+    .chest-section { font-size: 13px; padding-top: 12px; margin-top: 12px; }
+    .password-section summary { font-size: 13px; padding: 8px 0; }
+    .password-section input { padding: 9px 10px; font-size: 13px; }
+    button.small { padding: 8px 12px; font-size: 12px; min-height: 36px; }
+    #logout-btn { padding: 10px; font-size: 13px; min-height: 36px; }
+    /* Leaderboard: roomier rows for finger taps + better readability */
+    .leaderboard-row { padding: 12px 10px; font-size: 13px; gap: 8px; }
+    .lb-rank { min-width: 28px; font-size: 13px; }
+    .lb-fame { font-size: 12px; }
 }
 
 @media (orientation: portrait) and (max-width: 768px) {
@@ -1386,26 +1414,27 @@ body.forge-open #ground-loot-panel { z-index: 200; }
 }
 
 /* Leaderboard */
-.leaderboard-section { margin-top: 16px; max-height: 300px; overflow-y: auto; }
-.leaderboard-section h3 { color: #c8a86e; margin-bottom: 8px; }
+.leaderboard-section { margin-top: 20px; max-height: 360px; overflow-y: auto; }
+.leaderboard-section h3 { color: #c8a86e; margin-bottom: 10px; }
 .leaderboard-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px; border-bottom: 1px solid #2a2530;
-    font-size: 13px; cursor: default;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-bottom: 1px solid #2a2530;
+    font-size: 14px; cursor: default;
 }
 .leaderboard-row:hover { background: #2a2530; }
-.lb-rank { color: #c8a86e; font-weight: bold; min-width: 28px; }
+.lb-rank { color: #c8a86e; font-weight: bold; min-width: 32px; }
 .lb-info { flex: 1; color: #e0d8c8; }
-.lb-fame { color: #aa8844; font-size: 12px; white-space: nowrap; }
+.lb-fame { color: #aa8844; font-size: 13px; white-space: nowrap; }
 
 #lb-tooltip {
     display: none; position: absolute; z-index: 9999;
     background: #1a1620; border: 1px solid #554840;
-    border-radius: 6px; padding: 8px 12px; pointer-events: none;
-    font-size: 12px; color: #e0d8c8; min-width: 220px;
+    border-radius: 6px; padding: 10px 14px; pointer-events: none;
+    font-size: 12px; color: #e0d8c8; min-width: 240px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
 }
-.lb-tooltip-title { color: #c8a86e; font-weight: bold; margin-bottom: 6px; font-size: 13px; }
+.lb-tooltip-title { color: #c8a86e; font-weight: bold; margin-bottom: 4px; font-size: 13px; }
+.lb-tooltip-sub { color: #aa8844; font-size: 11px; margin-bottom: 8px; letter-spacing: 0.5px; }
 .lb-tooltip-equip { display: flex; flex-direction: column; gap: 4px; }
 .lb-tooltip-item { display: flex; align-items: center; gap: 6px; color: #b8b0a0; padding: 2px 0; }
 .lb-tooltip-sprite { width: 24px; height: 24px; image-rendering: pixelated; flex-shrink: 0; }
