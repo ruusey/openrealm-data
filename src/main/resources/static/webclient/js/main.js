@@ -709,6 +709,120 @@ function hideEquipmentTooltip() {
     if (tip) tip.style.display = 'none';
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// Fame Store — modal triggered by interacting with a fame_store tile.
+// Server is the source of truth for fame balance and item grants. The UI
+// displays the items, sends a buy request, and re-renders on the refreshed
+// OPEN_FAME_STORE packet (server resends after each successful purchase).
+// ────────────────────────────────────────────────────────────────────────
+
+// Fame cost per item — must match ServerFameStoreHelper.DYE_FAME_COST. Kept
+// here only for displaying the price/disable state; the server is what
+// actually charges and rejects underfunded purchases.
+const FAME_STORE_DYE_COST = 500;
+let _fameStoreCurrentBalance = 0;
+let _fameStoreInitialized = false;
+
+function _fameStoreItemList() {
+    // Fame-shop items: every entry in game.itemData with category 'dye'.
+    // Future patterned cloths sharing the 'dye' category will appear too;
+    // a separate 'cloth' category later would split the modal into tabs.
+    if (!game.itemData) return [];
+    const list = [];
+    for (const def of Object.values(game.itemData)) {
+        if (def && def.category === 'dye') list.push(def);
+    }
+    list.sort((a, b) => (a.itemId || 0) - (b.itemId || 0));
+    return list;
+}
+
+function _setFameStoreStatus(text, kind) {
+    const el = document.getElementById('fame-store-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'fame-store-status' + (kind ? ' ' + kind : '');
+}
+
+function renderFameStoreList() {
+    const list = document.getElementById('fame-store-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const items = _fameStoreItemList();
+    if (items.length === 0) {
+        list.innerHTML = '<div style="grid-column:1/-1;padding:12px;color:#887868;text-align:center">Nothing for sale.</div>';
+        return;
+    }
+    for (const def of items) {
+        const row = document.createElement('div');
+        row.className = 'fame-store-row';
+
+        const icon = document.createElement('div');
+        icon.className = 'fame-store-icon';
+        // getItemSpriteUrl returns a data URL; fall back to a blank tile if
+        // the renderer hasn't loaded the sheet yet.
+        const url = getItemSpriteUrl({ itemId: def.itemId });
+        if (url) icon.style.cssText += `background-image:url('${url}');background-size:contain;background-repeat:no-repeat;background-color:#1a1218`;
+        row.appendChild(icon);
+
+        const info = document.createElement('div');
+        info.className = 'fame-store-info';
+        info.innerHTML = `<div class="fame-store-name">${def.name || ('Item ' + def.itemId)}</div>
+                          <div class="fame-store-cost">✦ ${FAME_STORE_DYE_COST} Fame</div>`;
+        row.appendChild(info);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'Buy';
+        btn.disabled = _fameStoreCurrentBalance < FAME_STORE_DYE_COST;
+        btn.addEventListener('click', () => {
+            if (game.playerId == null) return;
+            _setFameStoreStatus('Purchasing…', '');
+            // Disable the row briefly so double-clicks don't fire two buys
+            // before the server response lands.
+            btn.disabled = true;
+            try {
+                network.send(PacketWriters.buyFameItem(game.playerId, def.itemId));
+            } catch (e) {
+                _setFameStoreStatus('Network error: ' + (e.message || e), 'error');
+                btn.disabled = false;
+            }
+        });
+        row.appendChild(btn);
+
+        list.appendChild(row);
+    }
+}
+
+function openFameStore(accountFame) {
+    const modal = document.getElementById('fame-store-modal');
+    if (!modal) return;
+    _fameStoreCurrentBalance = Number(accountFame) || 0;
+    document.getElementById('fame-store-fame').textContent = _fameStoreCurrentBalance.toLocaleString();
+    // Clear stale status from any prior session.
+    _setFameStoreStatus('');
+    renderFameStoreList();
+    modal.removeAttribute('hidden');
+    // Bind once: close button + backdrop click.
+    if (!_fameStoreInitialized) {
+        _fameStoreInitialized = true;
+        document.getElementById('fame-store-close-btn').addEventListener('click', closeFameStore);
+        document.getElementById('fame-store-backdrop').addEventListener('click', closeFameStore);
+    }
+    // Cache the live account fame on the global account so the HUD stays
+    // in sync without an extra REST roundtrip.
+    if (account) account.accountFame = _fameStoreCurrentBalance;
+}
+
+function closeFameStore() {
+    const modal = document.getElementById('fame-store-modal');
+    if (modal) modal.setAttribute('hidden', '');
+}
+
+function isFameStoreOpen() {
+    const modal = document.getElementById('fame-store-modal');
+    return !!(modal && !modal.hasAttribute('hidden'));
+}
+
 document.getElementById('play-btn').addEventListener('click', () => {
     if (selectedCharacter) {
         gameServerHost = document.getElementById('server-addr').value || 'useast';
@@ -1194,7 +1308,7 @@ async function startGame() {
 
     // Load game data
     try {
-        const [tileData, enemyData, itemData, charClasses, portalData, projGroups, expLevels, mapData, lootContainerDefs, animData] = await Promise.all([
+        const [tileData, enemyData, itemData, charClasses, portalData, projGroups, expLevels, mapData, lootContainerDefs, animData, classMaskData, dyeAssets] = await Promise.all([
             api.getGameData('tiles.json'),
             api.getGameData('enemies.json'),
             api.getGameData('game-items.json'),
@@ -1204,7 +1318,13 @@ async function startGame() {
             api.getGameData('exp-levels.json'),
             api.getGameData('maps.json'),
             api.getGameData('loot-containers.json'),
-            api.getGameData('animations.json')
+            api.getGameData('animations.json'),
+            // Per-class pixel masks (accessory vs clothing) painted in the
+            // editor. Renderer uses them to recolor regions by dye id.
+            api.getGameData('character-class-masks.json').catch(() => []),
+            // Dye registry — maps dyeId to a recolor strategy. Solid colors
+            // today; patterned cloths slot in here later without a wire change.
+            api.getGameData('dye-assets.json').catch(() => [])
         ]);
 
         // Index by ID
@@ -1235,6 +1355,27 @@ async function startGame() {
         else game.projectileGroups = projGroups;
 
         game.expLevels = expLevels;
+
+        // Index class masks by classId, and a secondary index by (classId, row, col)
+        // for fast lookup at render time.
+        game.classMasks = {};
+        game.classMaskFrameIndex = {}; // key: `${classId}:${row}:${col}` -> frame
+        if (Array.isArray(classMaskData)) {
+            for (const entry of classMaskData) {
+                game.classMasks[entry.classId] = entry;
+                if (Array.isArray(entry.frames)) {
+                    for (const f of entry.frames) {
+                        game.classMaskFrameIndex[`${entry.classId}:${f.row}:${f.col}`] = f;
+                    }
+                }
+            }
+        }
+
+        // Index dye assets by dyeId.
+        game.dyeAssets = {};
+        if (Array.isArray(dyeAssets)) {
+            for (const d of dyeAssets) game.dyeAssets[d.dyeId] = d;
+        }
 
         // Store map data in renderer for tile size lookups
         renderer.setMapData(mapData);
@@ -1496,6 +1637,13 @@ function setupNetworkHandlers() {
 
     network.on(PacketId.OPEN_FORGE, (data) => {
         if (data && data.playerId != null) openForgeModal();
+    });
+
+    network.on(PacketId.OPEN_FAME_STORE, (data) => {
+        if (!data || data.playerId == null) return;
+        // Server sends the fresh fame total in the packet so we don't need to
+        // re-fetch the account REST endpoint to display it.
+        openFameStore(Number(data.accountFame) || 0);
     });
 
     // Trading handlers managed by trade.js module
@@ -2219,7 +2367,9 @@ function updateInteractPrompt(local) {
         _interactCandidate = found;
         const label = document.getElementById('interact-label');
         const btn = document.getElementById('interact-btn');
-        const verb = found.type === 'forge' ? 'Use Forge' : `Use ${found.name}`;
+        const verb = found.type === 'forge' ? 'Use Forge'
+            : found.type === 'fame_store' ? 'Open Fame Store'
+            : `Use ${found.name}`;
         if (label) label.textContent = verb + ' (F)';
         if (btn) btn.textContent = 'Use';
         prompt.style.display = 'flex';

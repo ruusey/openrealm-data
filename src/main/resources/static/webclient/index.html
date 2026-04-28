@@ -258,6 +258,25 @@
         <button id="interact-btn">Use</button>
     </div>
 
+    <!-- Fame Store modal: spend banked account fame on cosmetic dyes/cloths.
+         Opens in response to OPEN_FAME_STORE packet. List populated from the
+         items pool (dyes today; patterned cloths added later as new dye-asset
+         entries). All purchase logic lives server-side. -->
+    <div id="fame-store-modal" class="modal-overlay" hidden>
+        <div id="fame-store-backdrop"></div>
+        <div id="fame-store-panel" role="dialog" aria-label="Fame Store">
+            <div class="forge-header">
+                <h2>FAME STORE</h2>
+                <button id="fame-store-close-btn" type="button" aria-label="Close">×</button>
+            </div>
+            <div class="fame-store-balance">
+                ✦ <span id="fame-store-fame">0</span> Fame
+            </div>
+            <div id="fame-store-list" class="fame-store-list"></div>
+            <p id="fame-store-status" class="fame-store-status"></p>
+        </div>
+    </div>
+
     <!-- Forge modal: pixel-edit enchantments onto an item using crystals + essence -->
     <div id="forge-modal" class="modal-overlay" hidden>
         <div id="forge-backdrop"></div>

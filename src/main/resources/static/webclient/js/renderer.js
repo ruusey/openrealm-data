@@ -296,6 +296,134 @@ export class GameRenderer {
         return new PIXI.Texture(tex.baseTexture, rect);
     }
 
+    /**
+     * Returns a dye-recolored texture for a class sprite cell. Falls back to
+     * the unmodified getRegion if no mask or no dye is set. Caches the
+     * dyed canvas/texture per (classId, row, col, dyeId) so we only recolor
+     * each unique sprite once.
+     *
+     * The dye is resolved through gameState.dyeAssets (keyed by dyeId) so a
+     * "dye" can be any recolor strategy — solid color today, patterned cloths
+     * later. For solid-color dyes we hue-shift each masked pixel toward the
+     * dye color while preserving the original luminance, so shading stays.
+     */
+    getDyedRegion(textureKey, classId, col, row, w, h, dyeId, gameState) {
+        if (!dyeId || dyeId === 0) return this.getRegion(textureKey, col, row, w, h);
+        const dye = gameState && gameState.dyeAssets && gameState.dyeAssets[dyeId];
+        if (!dye) return this.getRegion(textureKey, col, row, w, h);
+        const frameKey = `${classId}:${row}:${col}`;
+        const frame = gameState && gameState.classMaskFrameIndex && gameState.classMaskFrameIndex[frameKey];
+        if (!frame || !frame.mask) return this.getRegion(textureKey, col, row, w, h);
+
+        if (!this._dyeTexCache) this._dyeTexCache = {};
+        const cacheKey = `${classId}:${row}:${col}:${dyeId}`;
+        if (this._dyeTexCache[cacheKey]) return this._dyeTexCache[cacheKey];
+
+        const key = textureKey.replace('.png', '');
+        const tex = this.textures[key];
+        if (!tex) return null;
+        const src = tex.baseTexture.resource && tex.baseTexture.resource.source;
+        if (!src) return this.getRegion(textureKey, col, row, w, h);
+
+        // Render the source cell into an offscreen canvas at 1:1 so we can
+        // sample/edit pixels.
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        try {
+            ctx.drawImage(src, col * w, row * h, w, h, 0, 0, w, h);
+        } catch (e) {
+            // Possible cross-origin canvas taint — bail to original.
+            return this.getRegion(textureKey, col, row, w, h);
+        }
+        let imgData;
+        try { imgData = ctx.getImageData(0, 0, w, h); }
+        catch (e) { return this.getRegion(textureKey, col, row, w, h); }
+        const pixels = imgData.data;
+        // Solid-color path: HSL hue/sat shift on every masked pixel that
+        // isn't transparent. Future dye types ("pattern", "gradient") branch
+        // off the dye.type field.
+        if (dye.type === 'solid') {
+            const dr = (dye.color >> 16) & 0xff;
+            const dg = (dye.color >> 8) & 0xff;
+            const db = dye.color & 0xff;
+            for (let y = 0; y < h; y++) {
+                const maskRow = frame.mask[y];
+                if (!maskRow) continue;
+                for (let x = 0; x < w; x++) {
+                    const v = maskRow[x];
+                    if (!v) continue; // 0 = no recolor
+                    const i = (y * w + x) * 4;
+                    if (pixels[i + 3] === 0) continue;
+                    // Preserve luminance: scale dye color so that the painted
+                    // pixel keeps the original brightness. This matches what
+                    // the editor's preview does.
+                    const lum = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+                    // Average dye luminance is just for normalization — clamp
+                    // each channel scaled by (lum / 128) so darker source
+                    // pixels stay dark and lighter ones stay light.
+                    const scale = lum / 128;
+                    pixels[i] = Math.min(255, Math.max(0, dr * scale));
+                    pixels[i + 1] = Math.min(255, Math.max(0, dg * scale));
+                    pixels[i + 2] = Math.min(255, Math.max(0, db * scale));
+                }
+            }
+        }
+        // Sprite-overlay path: dye is an 8×8 sprite cell that gets composited
+        // through the same mask. Useful for patterned cloths (plaid, stripes,
+        // gradients) — drop the sprite into the mask region and the per-class
+        // mask still controls which pixels get painted.
+        if (dye.type === 'sprite' && dye.spriteKey) {
+            const dyeKey = dye.spriteKey.replace('.png', '');
+            const dyeTex = this.textures[dyeKey];
+            const dyeSrc = dyeTex && dyeTex.baseTexture.resource && dyeTex.baseTexture.resource.source;
+            if (dyeSrc) {
+                const dRow = dye.row || 0, dCol = dye.col || 0;
+                const dW = dye.spriteSize || w, dH = dye.spriteHeight || dye.spriteSize || h;
+                const overlay = document.createElement('canvas');
+                overlay.width = w; overlay.height = h;
+                const oCtx = overlay.getContext('2d');
+                oCtx.imageSmoothingEnabled = false;
+                try {
+                    // Stretch / center the dye cell over the mask region. For
+                    // 8x8 dye + 8x8 mask this is a 1:1 copy; non-matching
+                    // sizes get nearest-neighbor scaled.
+                    oCtx.drawImage(dyeSrc, dCol * dW, dRow * dH, dW, dH, 0, 0, w, h);
+                    const overlayData = oCtx.getImageData(0, 0, w, h).data;
+                    for (let y = 0; y < h; y++) {
+                        const maskRow = frame.mask[y];
+                        if (!maskRow) continue;
+                        for (let x = 0; x < w; x++) {
+                            const v = maskRow[x];
+                            if (!v) continue;
+                            const i = (y * w + x) * 4;
+                            if (pixels[i + 3] === 0) continue;
+                            const oa = overlayData[i + 3];
+                            if (oa === 0) continue;
+                            // Multiply original luminance by the overlay
+                            // color, same brightness preservation as the
+                            // solid path so shading carries through.
+                            const lum = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+                            const scale = lum / 128;
+                            pixels[i] = Math.min(255, overlayData[i] * scale);
+                            pixels[i + 1] = Math.min(255, overlayData[i + 1] * scale);
+                            pixels[i + 2] = Math.min(255, overlayData[i + 2] * scale);
+                        }
+                    }
+                } catch (e) {
+                    // Fallthrough — keep original sprite if the overlay sheet
+                    // is cross-origin tainted or missing.
+                }
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        const dyedTex = PIXI.Texture.from(canvas);
+        dyedTex.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST;
+        this._dyeTexCache[cacheKey] = dyedTex;
+        return dyedTex;
+    }
+
     // Build tile texture lookup from tile definitions
     buildTileTextures(tileData) {
         this.tileTextures = {};
@@ -781,7 +909,13 @@ export class GameRenderer {
 
         const spW = animDef?.spriteSize || BASE_SPRITE_SIZE;
         const spH = animDef?.spriteHeight || spW;
-        const tex = this.getRegion(sheetKey, frameCol, row, spW, spH);
+        // Resolve dye id: for the local player we keep their own dyeId on
+        // game state too, so a freshly-applied dye paints instantly without
+        // waiting for the next UpdatePacket round-trip.
+        const playerDyeId = isLocal ? (gameState.dyeId || player.dyeId || 0) : (player.dyeId || 0);
+        const tex = playerDyeId
+            ? this.getDyedRegion(sheetKey, classId, frameCol, row, spW, spH, playerDyeId, gameState)
+            : this.getRegion(sheetKey, frameCol, row, spW, spH);
         if (tex) {
             const flipX = player.facing === 'left';
 

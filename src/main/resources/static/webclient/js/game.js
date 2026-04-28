@@ -146,6 +146,11 @@ export class GameState {
         this.hpPotions = 0;
         this.mpPotions = 0;
 
+        // Cosmetic dye id for the local player (0 = no dye). Renderer reads
+        // this in renderPlayer so a dye applies instantly on the dyer's
+        // screen, before the UpdatePacket round-trip.
+        this.dyeId = 0;
+
         // Realm transition screen state
         this.transitionActive = false;
         this.transitionStartTime = 0;
@@ -774,6 +779,7 @@ export class GameState {
             this.inventory = packet.inventory;
             if (packet.hpPotions !== undefined) this.hpPotions = packet.hpPotions;
             if (packet.mpPotions !== undefined) this.mpPotions = packet.mpPotions;
+            if (packet.dyeId !== undefined) this.dyeId = packet.dyeId;
             this.playerName = packet.playerName;
         }
         const player = this.players.get(packet.playerId);
@@ -784,6 +790,11 @@ export class GameState {
             player.mana = packet.mana;
             player.maxMana = packet.stats.mp;
             player.stats = packet.stats;
+            // Cosmetic dye: UpdatePacket carries dyeId so it propagates the
+            // moment a dye is consumed (LoadPacket diff only re-sends new
+            // players, so dye changes wouldn't otherwise reach the renderer
+            // until the player un/re-loaded).
+            if (packet.dyeId !== undefined) player.dyeId = packet.dyeId;
         }
         const enemy = this.enemies.get(packet.playerId);
         if (enemy) {

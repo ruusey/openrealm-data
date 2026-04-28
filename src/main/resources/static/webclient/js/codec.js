@@ -305,7 +305,8 @@ export const PacketId = {
     CREATE_EFFECT: 21, LOGIN_ACK: 22, GLOBAL_PLAYER_POSITION: 23,
     PLAYER_STATE: 24, COMPACT_MOVE: 25, PLAYER_POS_ACK: 26,
     CONSUME_SHARD_STACK: 27, INTERACT_TILE: 28, OPEN_FORGE: 29,
-    FORGE_ENCHANT: 30, FORGE_DISENCHANT: 31
+    FORGE_ENCHANT: 30, FORGE_DISENCHANT: 31,
+    OPEN_FAME_STORE: 32, BUY_FAME_ITEM: 33
 };
 
 // ---- Packet Readers (server → client packets read from binary) ----
@@ -316,7 +317,8 @@ export const PacketReaders = {
             playerId: r.readLong(), playerName: r.readString(), stats: NetStats.read(r),
             health: r.readInt(), mana: r.readInt(), experience: r.readLong(),
             inventory: r.readArray(rr => NetGameItem.read(rr)),
-            hpPotions: r.readByte(), mpPotions: r.readByte()
+            hpPotions: r.readByte(), mpPotions: r.readByte(),
+            dyeId: r.readInt()
         };
     },
     [PacketId.PLAYER_STATE](r) {
@@ -420,7 +422,8 @@ export const PacketReaders = {
     [PacketId.PLAYER_POS_ACK](r) {
         return { seq: r.readInt(), posX: r.readFloat(), posY: r.readFloat() };
     },
-    [PacketId.OPEN_FORGE](r) { return { playerId: r.readLong() }; }
+    [PacketId.OPEN_FORGE](r) { return { playerId: r.readLong() }; },
+    [PacketId.OPEN_FAME_STORE](r) { return { playerId: r.readLong(), accountFame: r.readLong() }; }
 };
 
 // ---- Packet Writers (client → server packets serialized to binary) ----
@@ -533,6 +536,12 @@ export const PacketWriters = {
         return buildPacket(PacketId.FORGE_DISENCHANT, w => {
             w.writeLong(playerId); w.writeByte(targetItemSlot);
         });
+    },
+
+    buyFameItem(playerId, itemId) {
+        return buildPacket(PacketId.BUY_FAME_ITEM, w => {
+            w.writeLong(playerId); w.writeInt(itemId);
+        });
     }
 };
 
@@ -548,7 +557,8 @@ const PACKET_NAMES = {
     21:'CREATE_EFFECT', 22:'LOGIN_ACK', 23:'GLOBAL_PLAYER_POSITION',
     24:'PLAYER_STATE',
     27:'CONSUME_SHARD_STACK', 28:'INTERACT_TILE', 29:'OPEN_FORGE',
-    30:'FORGE_ENCHANT', 31:'FORGE_DISENCHANT'
+    30:'FORGE_ENCHANT', 31:'FORGE_DISENCHANT',
+    32:'OPEN_FAME_STORE', 33:'BUY_FAME_ITEM'
 };
 
 export function parseFrame(arrayBuffer) {

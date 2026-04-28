@@ -3110,5 +3110,20 @@
             "damaging": 0,
             "isWall": 0
         }
+    },
+    {
+        "tileId": 301,
+        "name": "Fame Store",
+        "spriteKey": "rotmg-tiles-all.png",
+        "row": 53,
+        "col": 6,
+        "size": 32,
+        "interactionType": "fame_store",
+        "data": {
+            "hasCollision": 1,
+            "slows": 0,
+            "damaging": 0,
+            "isWall": 0
+        }
     }
 ]

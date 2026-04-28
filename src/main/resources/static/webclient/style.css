@@ -970,6 +970,71 @@ button.small { padding: 8px 14px; font-size: 13px; width: auto; margin: 0; }
 .forge-cost {
     font-size: 11px; color: #b8a89a; text-align: center; min-height: 14px;
 }
+
+/* Fame Store modal — reuses .modal-overlay + .forge-header conventions for
+   visual consistency with the Forge. List of purchasable dyes (and later
+   patterned cloths) with a balance readout and an inline status line. */
+#fame-store-panel {
+    position: relative;
+    width: 480px;
+    max-width: 92vw;
+    max-height: 85vh;
+    background: #1a1218;
+    border: 2px solid #c8a86e;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: #e0d8c8;
+    font-family: 'OryxSimplex', monospace;
+}
+#fame-store-backdrop {
+    position: absolute; inset: 0; background: rgba(0, 0, 0, 0.65); cursor: pointer;
+}
+.fame-store-balance {
+    padding: 12px 18px; text-align: center; font-size: 16px;
+    color: #ffd86b; border-bottom: 1px solid #3a2a38;
+    letter-spacing: 1px;
+}
+.fame-store-list {
+    padding: 14px; display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; overflow-y: auto;
+}
+.fame-store-row {
+    display: flex; align-items: center; gap: 10px;
+    background: #2a2030; border: 1px solid #3a2a38; border-radius: 6px;
+    padding: 8px 10px;
+}
+.fame-store-row .fame-store-icon {
+    width: 32px; height: 32px; image-rendering: pixelated; flex-shrink: 0;
+    background: #1a1218; border-radius: 3px;
+}
+.fame-store-row .fame-store-info {
+    flex: 1; min-width: 0;
+}
+.fame-store-row .fame-store-name {
+    font-size: 13px; color: #c8a86e; font-weight: 600;
+}
+.fame-store-row .fame-store-cost {
+    font-size: 11px; color: #aa8844;
+}
+.fame-store-row button {
+    width: auto; padding: 6px 12px; font-size: 12px;
+    background: #c8a86e; color: #1a1218; border: none; border-radius: 4px;
+    cursor: pointer; margin: 0;
+}
+.fame-store-row button:hover:not(:disabled) { background: #ffd86b; }
+.fame-store-row button:disabled { background: #5a4a3a; color: #887868; cursor: default; }
+.fame-store-status {
+    padding: 0 14px 12px; min-height: 14px; font-size: 12px;
+    color: #aa8844; text-align: center;
+}
+.fame-store-status.error { color: #e85050; }
+.fame-store-status.success { color: #8af08a; }
+@media (max-width: 720px) {
+    .fame-store-list { grid-template-columns: 1fr; }
+}
 .forge-cost .ok { color: #5fd06f; }
 .forge-cost .bad { color: #ff6060; }
 .forge-footer {
