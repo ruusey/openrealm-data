@@ -254,18 +254,31 @@ public class PlayerDataService {
     }
 
     public void deleteCharacter(final HttpServletRequest request, final String characterUuid) throws Exception {
-        this.deleteCharacter(request, characterUuid, false);
+        this.deleteCharacter(request, characterUuid, false, null);
+    }
+
+    public void deleteCharacter(final HttpServletRequest request, final String characterUuid, final boolean bankFame) throws Exception {
+        this.deleteCharacter(request, characterUuid, bankFame, null);
     }
 
     /**
-     * Delete a character. When {@code bankFame} is true, the character's fame
-     * (computed from its banked xp via {@link com.openrealm.game.model.ExperienceModel#getBaseFame})
-     * is added to the owning account's lifetime {@code accountFame} total
-     * before the character is marked deleted. The game server passes this flag
-     * on permadeath; user-initiated deletes from the character-select screen
-     * leave it false (no fame credit for self-deletes).
+     * Delete a character. When {@code bankFame} is true, fame is credited to
+     * the owning account's lifetime {@code accountFame} total before the
+     * character is marked deleted.
+     *
+     * If {@code precomputedFameAmount} is non-null it is credited verbatim —
+     * the game server uses this path so it can compute fame from the live
+     * in-memory xp on the tick thread (no I/O) without depending on the
+     * periodic 12s persist having run. Otherwise the fame is computed here
+     * from {@link CharacterEntity#getStats()#getXp()}, which may be up to
+     * 12s stale if the player just gained xp.
+     *
+     * The game server passes bankFame=true on permadeath; user-initiated
+     * deletes from the character-select screen leave it false so self-
+     * deletes don't earn fame.
      */
-    public void deleteCharacter(final HttpServletRequest request, final String characterUuid, final boolean bankFame) throws Exception {
+    public void deleteCharacter(final HttpServletRequest request, final String characterUuid,
+            final boolean bankFame, final Long precomputedFameAmount) throws Exception {
         final long start = Instant.now().toEpochMilli();
         final PlayerAccountEntity account = this.playerAccountRepository.findByCharactersCharacterUuid(characterUuid);
         if (!this.authFilter.accountGuidMatch(account.getAccountUuid(), request)) {
@@ -278,14 +291,21 @@ public class PlayerDataService {
         final CharacterEntity character = characterToDelete.get();
         if (bankFame) {
             try {
-                final long xp = (character.getStats() != null && character.getStats().getXp() != null)
-                        ? character.getStats().getXp() : 0L;
-                final long earned = GameDataManager.EXPERIENCE_LVLS.getBaseFame(xp);
+                final long earned;
+                if (precomputedFameAmount != null) {
+                    // Trust the game server's computation — it has live xp.
+                    earned = Math.max(0L, precomputedFameAmount);
+                } else {
+                    // Fallback: compute from possibly-stale persisted xp.
+                    final long xp = (character.getStats() != null && character.getStats().getXp() != null)
+                            ? character.getStats().getXp() : 0L;
+                    earned = GameDataManager.EXPERIENCE_LVLS.getBaseFame(xp);
+                }
                 if (earned > 0) {
                     final long prev = account.getAccountFame() == null ? 0L : account.getAccountFame();
                     account.setAccountFame(prev + earned);
-                    PlayerDataService.log.info("Banked {} fame to account {} from dying character {} (xp={}, total now {})",
-                            earned, account.getAccountUuid(), characterUuid, xp, prev + earned);
+                    PlayerDataService.log.info("Banked {} fame to account {} from dying character {} (total now {})",
+                            earned, account.getAccountUuid(), characterUuid, prev + earned);
                 }
             } catch (Exception fameEx) {
                 // Don't fail the whole delete if fame banking blows up — log and proceed.

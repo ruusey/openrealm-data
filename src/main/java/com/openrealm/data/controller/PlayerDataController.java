@@ -178,10 +178,11 @@ public class PlayerDataController {
 
     @DeleteMapping(value = "/account/character/{characterUuid}", produces = { "application/json" })
     public ResponseEntity<?> deleteCharacter(final HttpServletRequest request, @PathVariable String characterUuid,
-            @RequestParam(name = "bankFame", required = false, defaultValue = "false") boolean bankFame) {
+            @RequestParam(name = "bankFame", required = false, defaultValue = "false") boolean bankFame,
+            @RequestParam(name = "fameAmount", required = false) Long fameAmount) {
         ResponseEntity<?> res = null;
         try {
-            this.playerDataService.deleteCharacter(request, characterUuid, bankFame);
+            this.playerDataService.deleteCharacter(request, characterUuid, bankFame, fameAmount);
 
             res = ApiUtils.buildSuccess(ErrorResponseObject.builder().message("successfully deleted character " + characterUuid)
                     .reason("Character deleted").status(HttpStatus.OK).build());
