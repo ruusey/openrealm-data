@@ -313,13 +313,18 @@ export const PacketId = {
 
 export const PacketReaders = {
     [PacketId.UPDATE](r) {
-        return {
+        // dyeId was added to UpdatePacket alongside the dye system. Older
+        // game servers don't include those 4 bytes — read them defensively
+        // so a half-deployed setup (data app updated, game server not yet)
+        // doesn't blow up every UpdatePacket and break entity sync.
+        const out = {
             playerId: r.readLong(), playerName: r.readString(), stats: NetStats.read(r),
             health: r.readInt(), mana: r.readInt(), experience: r.readLong(),
             inventory: r.readArray(rr => NetGameItem.read(rr)),
-            hpPotions: r.readByte(), mpPotions: r.readByte(),
-            dyeId: r.readInt()
+            hpPotions: r.readByte(), mpPotions: r.readByte()
         };
+        out.dyeId = r.remaining() >= 4 ? r.readInt() : 0;
+        return out;
     },
     [PacketId.PLAYER_STATE](r) {
         return {

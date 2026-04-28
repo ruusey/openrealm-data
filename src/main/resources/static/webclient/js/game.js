@@ -535,6 +535,32 @@ export class GameState {
                     continue;
                 }
             }
+            // The server now sends the full player set every tick (so a
+            // dropped packet self-heals next tick). When we already track
+            // this player, refresh their authoritative fields in place so we
+            // don't reset their animation/interpolation state every tick.
+            const existing = this.players.get(p.id);
+            if (existing) {
+                existing.classId = p.classId;
+                existing.name = p.name;
+                existing.chatRole = p.chatRole;
+                existing.size = p.size || existing.size || 28;
+                existing.dyeId = p.dyeId || 0;
+                // Position interpolation: only update target if the server's
+                // position diverges from our last snapshot — otherwise we'd
+                // re-snap every tick.
+                const dxErr = (p.pos.x - existing._snapX) * (p.pos.x - existing._snapX);
+                const dyErr = (p.pos.y - existing._snapY) * (p.pos.y - existing._snapY);
+                if (dxErr + dyErr > 0.5) {
+                    existing._prevX = existing.targetX != null ? existing.targetX : existing._snapX;
+                    existing._prevY = existing.targetY != null ? existing.targetY : existing._snapY;
+                    existing.targetX = p.pos.x; existing.targetY = p.pos.y;
+                    existing._snapX = p.pos.x; existing._snapY = p.pos.y;
+                    existing._snapTime = performance.now();
+                }
+                existing.dx = p.dX; existing.dy = p.dY;
+                continue;
+            }
             this.players.set(p.id, {
                 ...p, dx: p.dX, dy: p.dY,
                 targetX: p.pos.x, targetY: p.pos.y,
@@ -551,16 +577,33 @@ export class GameState {
             // Only keep predicted health if server sent 0 (meaning it hasn't changed).
             const serverHealth = e.health;
             const useHealth = (serverHealth > 0) ? serverHealth : (existing?.health ?? serverHealth);
+            // Server now re-broadcasts the full enemy set every tick. For
+            // already-tracked enemies, refresh authoritative fields in place
+            // so we don't snap their animation/interpolation state.
+            if (existing) {
+                Object.assign(existing, e);
+                existing.dx = e.dX; existing.dy = e.dY;
+                existing.health = useHealth;
+                const dxErr = (e.pos.x - existing._snapX) * (e.pos.x - existing._snapX);
+                const dyErr = (e.pos.y - existing._snapY) * (e.pos.y - existing._snapY);
+                if (dxErr + dyErr > 0.5) {
+                    existing._prevX = existing.targetX != null ? existing.targetX : existing._snapX;
+                    existing._prevY = existing.targetY != null ? existing.targetY : existing._snapY;
+                    existing.targetX = e.pos.x; existing.targetY = e.pos.y;
+                    existing._snapX = e.pos.x; existing._snapY = e.pos.y;
+                    existing._snapTime = performance.now();
+                }
+                continue;
+            }
             this.enemies.set(e.id, {
                 ...e, dx: e.dX, dy: e.dY,
                 targetX: e.pos.x, targetY: e.pos.y,
                 _prevX: e.pos.x, _prevY: e.pos.y,
                 _snapX: e.pos.x, _snapY: e.pos.y,
                 _snapTime: performance.now(),
-                animFrame: existing?.animFrame || 0, animTimer: existing?.animTimer || 0,
-                effectIds: existing?.effectIds || [],
+                animFrame: 0, animTimer: 0,
+                effectIds: [],
                 health: useHealth,
-
             });
         }
         // Predicted bullets (negative IDs) are never bulk-deleted. They expire
