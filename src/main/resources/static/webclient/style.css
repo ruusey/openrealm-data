@@ -390,6 +390,95 @@ button.small { padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
 .tier-0 { color: #aaa; } .tier-1 { color: #40c040; } .tier-2 { color: #4080e0; }
 .tier-3 { color: #c040c0; } .tier-4 { color: #c8a86e; } .tier-5 { color: #ff4040; }
 
+/* ---- Item tooltip (custom hover popup, replaces the unstyled native title) ---- */
+#item-tooltip {
+    position: fixed;
+    z-index: 100;
+    pointer-events: none;
+    background: #1a1218ee;
+    border: 1px solid #4a3a58;
+    border-radius: 6px;
+    padding: 10px 12px;
+    min-width: 180px;
+    max-width: 280px;
+    font-family: 'OryxSimplex', 'Segoe UI', Tahoma, sans-serif;
+    color: #b8b0a0;
+    font-size: 12px;
+    line-height: 1.45;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+#item-tooltip .it-name {
+    font-weight: bold;
+    font-size: 14px;
+    color: #c8a86e;
+    margin-bottom: 2px;
+}
+/* Tier-tinted name color, matches inventory tier badges */
+#item-tooltip .it-name-tier-0 { color: #aaaaaa; }
+#item-tooltip .it-name-tier-1 { color: #40c040; }
+#item-tooltip .it-name-tier-2 { color: #4080e0; }
+#item-tooltip .it-name-tier-3 { color: #c040c0; }
+#item-tooltip .it-name-tier-4 { color: #c8a86e; }
+#item-tooltip .it-name-tier-5 { color: #ff4040; }
+#item-tooltip .it-subtitle {
+    color: #887868;
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+#item-tooltip .it-desc {
+    color: #b8a898;
+    font-style: italic;
+    font-size: 11px;
+    margin: 4px 0 8px 0;
+    border-left: 2px solid #3a2a38;
+    padding-left: 6px;
+}
+#item-tooltip .it-damage {
+    color: #d8c8b0;
+    margin: 4px 0;
+}
+#item-tooltip .it-damage-val { color: #e0a060; font-weight: bold; }
+#item-tooltip .it-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 14px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #3a2a38;
+}
+#item-tooltip .it-stat {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+}
+#item-tooltip .it-stat-label { color: #887868; }
+#item-tooltip .it-stat-pos { color: #40c040; font-weight: 600; }
+#item-tooltip .it-stat-neg { color: #e06060; font-weight: 600; }
+#item-tooltip .it-ench {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #3a2a38;
+}
+#item-tooltip .it-ench-header { color: #c8a86e; font-size: 11px; margin-bottom: 4px; }
+#item-tooltip .it-ench-list { display: flex; flex-wrap: wrap; gap: 4px; }
+#item-tooltip .it-ench-pip {
+    background: #2a2030;
+    border: 1px solid #4a3a58;
+    color: #c8a86e;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: bold;
+}
+#item-tooltip .it-stack {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #3a2a38;
+    color: #6080e0;
+    font-weight: bold;
+}
+#item-tooltip .it-stack-max { color: #887868; font-weight: normal; }
+
 .inv-slot .item-stack {
     position: absolute; bottom: 1px; right: 2px;
     font-size: 9px; font-weight: bold;

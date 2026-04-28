@@ -2277,6 +2277,8 @@ function updateInventoryUI() {
         document.getElementById('inv-label').style.display = 'none';
     }
 
+    // Detached slot elements never fire mouseleave; hide any stuck tooltip.
+    hideItemTooltip();
     equipEl.innerHTML = '';
     invEl.innerHTML = '';
 
@@ -2505,7 +2507,7 @@ function updateGroundLootUI() {
         if (lastLootKey === tradeKey) return;
         lastLootKey = tradeKey;
 
-        lootEl.innerHTML = '';
+        hideItemTooltip(); lootEl.innerHTML = '';
         // Show partner's inventory slots 4-11 (their backpack, not equipment)
         for (let i = 0; i < 8; i++) {
             const item = partnerInv[i + 4]; // Slots 4-11 of partner's inventory
@@ -2515,8 +2517,9 @@ function updateGroundLootUI() {
             if (partnerSelected[i]) div.classList.add('trade-selected');
 
             if (item && item.itemId >= 0) {
-                const tooltip = game.getItemTooltip(item);
-                if (tooltip) div.title = tooltip;
+                div.addEventListener('mouseenter', (ev) => showItemTooltip(item, ev));
+                div.addEventListener('mousemove', (ev) => positionItemTooltip(ev));
+                div.addEventListener('mouseleave', hideItemTooltip);
                 const spriteUrl = getItemSpriteUrl(item);
                 if (spriteUrl) {
                     const img = document.createElement('img');
@@ -2563,6 +2566,47 @@ function updateGroundLootUI() {
     }
 }
 
+// ---- Custom themed item tooltip ----
+// Single shared element, populated on hover. Cursor-follow with edge-aware
+// flipping so it never clips outside the viewport.
+let _itemTooltipEl = null;
+function _ensureItemTooltipEl() {
+    if (_itemTooltipEl && _itemTooltipEl.parentNode) return _itemTooltipEl;
+    _itemTooltipEl = document.createElement('div');
+    _itemTooltipEl.id = 'item-tooltip';
+    _itemTooltipEl.style.display = 'none';
+    document.body.appendChild(_itemTooltipEl);
+    return _itemTooltipEl;
+}
+function showItemTooltip(item, ev) {
+    const html = game.getItemTooltipHTML(item);
+    if (!html) return;
+    const el = _ensureItemTooltipEl();
+    el.innerHTML = html;
+    el.style.display = 'block';
+    positionItemTooltip(ev);
+}
+function positionItemTooltip(ev) {
+    if (!_itemTooltipEl || _itemTooltipEl.style.display === 'none') return;
+    const pad = 14;
+    const w = _itemTooltipEl.offsetWidth;
+    const h = _itemTooltipEl.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Default: above-left of cursor; flip to right/below if it would clip.
+    let x = ev.clientX - w - pad;
+    let y = ev.clientY - h - pad;
+    if (x < 8) x = ev.clientX + pad;
+    if (y < 8) y = ev.clientY + pad;
+    if (x + w > vw - 8) x = vw - w - 8;
+    if (y + h > vh - 8) y = vh - h - 8;
+    _itemTooltipEl.style.left = x + 'px';
+    _itemTooltipEl.style.top = y + 'px';
+}
+function hideItemTooltip() {
+    if (_itemTooltipEl) _itemTooltipEl.style.display = 'none';
+}
+
 function createSlot(item, label, slotIdx, isLoot = false) {
     const div = document.createElement('div');
     div.className = 'inv-slot' + (isLoot ? ' loot-slot' : '');
@@ -2577,9 +2621,11 @@ function createSlot(item, label, slotIdx, isLoot = false) {
     }
 
     if (item && item.itemId >= 0) {
-        // Rich tooltip
-        const tooltip = game.getItemTooltip(item);
-        if (tooltip) div.title = tooltip;
+        // Custom themed tooltip on hover (replaces the unstyled native
+        // div.title, which couldn't carry the OryxSimplex font / palette).
+        div.addEventListener('mouseenter', (ev) => showItemTooltip(item, ev));
+        div.addEventListener('mousemove', (ev) => positionItemTooltip(ev));
+        div.addEventListener('mouseleave', hideItemTooltip);
 
         const spriteUrl = getItemSpriteUrl(item);
         if (spriteUrl) {

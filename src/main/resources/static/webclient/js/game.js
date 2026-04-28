@@ -398,14 +398,17 @@ export class GameState {
             const bonuses = vals.map((v, i) => v !== 0 ? `${v > 0 ? '+' : ''}${v} ${statNames[i]}` : null).filter(Boolean);
             if (bonuses.length) lines.push(bonuses.join(', '));
         }
-        // Forged enchantments — show breakdown per enchantment
+        // Forged enchantments — group by stat, sum deltas. Five +1 DEX
+        // enchantments show as "+5 DEX" instead of five separate lines.
         if (item.enchantments && item.enchantments.length > 0) {
             const statLabel = ['VIT','WIS','HP','MP','ATT','DEF','SPD','DEX'];
             lines.push(`Forged (${item.enchantments.length}/5):`);
+            const totals = new Map();
             for (const e of item.enchantments) {
-                const lab = statLabel[e.statId] || '?';
-                const v = e.deltaValue || 1;
-                lines.push(`  +${v} ${lab}`);
+                totals.set(e.statId, (totals.get(e.statId) || 0) + (e.deltaValue || 1));
+            }
+            for (const [statId, sum] of totals) {
+                lines.push(`  +${sum} ${statLabel[statId] || '?'}`);
             }
         }
         if (item.stackable && (item.stackCount || 1) > 1) {
@@ -415,6 +418,65 @@ export class GameState {
         const cls = item.targetClass;
         if (cls >= 0 && cls < CLASS_NAMES.length) lines.push(`Class: ${CLASS_NAMES[cls]}`);
         return lines.join('\n');
+    }
+
+    /** Rich HTML tooltip used by the custom hover popup (see main.js
+     *  showItemTooltip). Mirrors getItemTooltip's content but with semantic
+     *  classes so the existing OryxSimplex / palette styles can theme it. */
+    getItemTooltipHTML(item) {
+        if (!item || item.itemId < 0) return null;
+        const def = this.getItemDef(item.itemId) || {};
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
+            {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const parts = [];
+        const name = item.name || def.name || 'Unknown Item';
+        const tierClass = item.tier >= 0 ? `it-name-tier-${Math.min(item.tier, 5)}` : '';
+        parts.push(`<div class="it-name ${tierClass}">${esc(name)}</div>`);
+        const subtitleBits = [];
+        if (item.tier >= 0) subtitleBits.push(`Tier ${item.tier}`);
+        const cls = item.targetClass;
+        if (cls >= 0 && cls < CLASS_NAMES.length) subtitleBits.push(CLASS_NAMES[cls]);
+        if (item.consumable) subtitleBits.push('Consumable');
+        if (subtitleBits.length) {
+            parts.push(`<div class="it-subtitle">${subtitleBits.map(esc).join(' · ')}</div>`);
+        }
+        const desc = item.description || def.description;
+        if (desc) parts.push(`<div class="it-desc">${esc(desc)}</div>`);
+        if (item.damage && (item.damage.min > 0 || item.damage.max > 0)) {
+            parts.push(`<div class="it-damage">Damage: <span class="it-damage-val">${item.damage.min}–${item.damage.max}</span></div>`);
+        }
+        const s = item.stats;
+        if (s) {
+            const statNames = ['HP','MP','DEF','ATT','SPD','DEX','VIT','WIS'];
+            const vals = [s.hp, s.mp, s.def, s.att, s.spd, s.dex, s.vit, s.wis];
+            const cells = [];
+            for (let i = 0; i < statNames.length; i++) {
+                const v = vals[i];
+                if (!v) continue;
+                const sign = v > 0 ? '+' : '';
+                const cls2 = v > 0 ? 'it-stat-pos' : 'it-stat-neg';
+                cells.push(`<span class="it-stat"><span class="it-stat-label">${statNames[i]}</span><span class="${cls2}">${sign}${v}</span></span>`);
+            }
+            if (cells.length) parts.push(`<div class="it-stats">${cells.join('')}</div>`);
+        }
+        if (item.enchantments && item.enchantments.length > 0) {
+            const statLabel = ['VIT','WIS','HP','MP','ATT','DEF','SPD','DEX'];
+            // Group by statId so 5 +1 DEX shows as one "+5 DEX" pip.
+            const totals = new Map();
+            for (const e of item.enchantments) {
+                totals.set(e.statId, (totals.get(e.statId) || 0) + (e.deltaValue || 1));
+            }
+            const rows = Array.from(totals, ([statId, sum]) =>
+                `<span class="it-ench-pip">+${sum} ${esc(statLabel[statId] || '?')}</span>`
+            ).join('');
+            parts.push(
+                `<div class="it-ench"><div class="it-ench-header">Forged (${item.enchantments.length}/5)</div>` +
+                `<div class="it-ench-list">${rows}</div></div>`);
+        }
+        if (item.stackable && (item.stackCount || 1) > 1) {
+            parts.push(`<div class="it-stack">Stack ×${item.stackCount}<span class="it-stack-max">/${item.maxStack}</span></div>`);
+        }
+        return parts.join('');
     }
 
     handleLoadMap(packet) {
