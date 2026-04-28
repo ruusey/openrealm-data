@@ -1275,7 +1275,7 @@ function setupNetworkHandlers() {
                     statusEl.textContent = 'Connected';
                     statusEl.className = 'connected';
 
-                    addChatMessage('SYSTEM', `Welcome to OpenRealm Server 0.5.0 — Playing as ${CLASS_NAMES[loginResp.classId]}`);
+                    addChatMessage('SYSTEM', `Welcome to OpenRealm Server 0.6.0 — Playing as ${CLASS_NAMES[loginResp.classId]}`);
                 } else {
                     const statusEl = document.getElementById('connection-status');
                     statusEl.textContent = 'Login failed';
