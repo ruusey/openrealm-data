@@ -579,19 +579,28 @@ export class GameState {
             const useHealth = (serverHealth > 0) ? serverHealth : (existing?.health ?? serverHealth);
             // Server now re-broadcasts the full enemy set every tick. For
             // already-tracked enemies, refresh authoritative fields in place
-            // so we don't snap their animation/interpolation state.
+            // WITHOUT touching existing.pos — the per-frame interpolator
+            // (movement loop above) walks pos toward targetX/Y smoothly.
+            // Object.assign would overwrite pos with the latest snapshot
+            // every tick and the enemy would visibly teleport.
             if (existing) {
-                Object.assign(existing, e);
+                existing.enemyId = e.enemyId;
+                existing.weaponId = e.weaponId;
+                existing.size = e.size || existing.size;
+                existing.shortId = e.shortId;
+                existing.difficulty = e.difficulty;
+                existing.maxHealth = e.maxHealth;
                 existing.dx = e.dX; existing.dy = e.dY;
                 existing.health = useHealth;
-                const dxErr = (e.pos.x - existing._snapX) * (e.pos.x - existing._snapX);
-                const dyErr = (e.pos.y - existing._snapY) * (e.pos.y - existing._snapY);
-                if (dxErr + dyErr > 0.5) {
-                    existing._prevX = existing.targetX != null ? existing.targetX : existing._snapX;
-                    existing._prevY = existing.targetY != null ? existing.targetY : existing._snapY;
-                    existing.targetX = e.pos.x; existing.targetY = e.pos.y;
-                    existing._snapX = e.pos.x; existing._snapY = e.pos.y;
-                    existing._snapTime = performance.now();
+                // Update interpolation target only when the server position
+                // actually changed. Tiny floats (sub-pixel) are no-ops to
+                // avoid resetting _snapTime on every tick which would also
+                // visibly stutter motion.
+                const dxErr = (e.pos.x - existing.targetX) * (e.pos.x - existing.targetX);
+                const dyErr = (e.pos.y - existing.targetY) * (e.pos.y - existing.targetY);
+                if (dxErr + dyErr > 0.25) {
+                    existing.targetX = e.pos.x;
+                    existing.targetY = e.pos.y;
                 }
                 continue;
             }
