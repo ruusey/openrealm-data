@@ -761,9 +761,13 @@ export class GameRenderer {
         const wadingClip = wading ? 0.30 : 0;
         const visibleHeight = size * (1 - wadingClip);
 
-        // Billboard container: counter-rotate so player always faces camera
+        // Billboard container: counter-rotate so player always faces camera.
+        // Round to integer pixels to match the rounded worldLayer.pivot (see
+        // render() line ~368) — without this, the camera quantizes to whole
+        // pixels but the sprite doesn't, producing a sub-pixel forward/back
+        // micro-jitter as the smooth camera advances.
         const bb = new PIXI.Container();
-        bb.position.set(sx + size / 2, sy + size / 2);
+        bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
         // All child positions are relative to container center (-size/2 offsets)
         const lx = -size / 2, ly = -size / 2;
@@ -857,6 +861,20 @@ export class GameRenderer {
         bars.endFill();
         bb.addChild(bars);
 
+        // Compute the same effective world-space center the sprite renders at,
+        // so the (pooled, screen-space) name + status icons stay glued to the
+        // sprite. Using raw player.pos.x/y here makes them follow the discrete
+        // sim-tick position while the sprite uses the smooth interpolated
+        // _renderX/_renderY (+ _smoothX/Y for local-player reconciliation),
+        // producing visible drift / "jump back" each tick.
+        const ePosX = isLocal && player._renderX !== undefined ? player._renderX : player.pos.x;
+        const ePosY = isLocal && player._renderY !== undefined ? player._renderY : player.pos.y;
+        const eSmoothX = isLocal ? (player._smoothX || 0) : 0;
+        const eSmoothY = isLocal ? (player._smoothY || 0) : 0;
+        const halfSize = (player.size || PLAYER_SIZE) / 2;
+        const eCxWorld = ePosX + halfSize + eSmoothX;
+        const eCyWorld = ePosY + halfSize + eSmoothY;
+
         // Player name above bars (other players only).
         // Pooled in _textContainer (screen-space) instead of inside `bb`, so the
         // Text instance survives the per-frame entityLayer destroy and we don't
@@ -865,12 +883,9 @@ export class GameRenderer {
         if (!isLocal) {
             const name = player.name || CLASS_NAMES[classId] || 'Player';
             const nameColor = GameRenderer.getNameColorHex(player.chatRole);
-            // Entity world-pixel center → screen coords. Add (0, barY-2) — the
-            // original offset was inside the billboarded `bb` whose local Y axis
-            // is screen-up, so the same offset applies in screen space.
-            const cxWorld = (player.pos.x || 0) + (player.size || PLAYER_SIZE) / 2;
-            const cyWorld = (player.pos.y || 0) + (player.size || PLAYER_SIZE) / 2;
-            const screen = this.worldToScreen(cxWorld, cyWorld, gameState);
+            // The original offset was inside the billboarded `bb` whose local Y
+            // axis is screen-up, so the same offset applies in screen space.
+            const screen = this.worldToScreen(eCxWorld, eCyWorld, gameState);
             const nameText = this._acquireNameText('p:' + String(player.id), name, nameColor);
             nameText.x = screen.x;
             nameText.y = screen.y + (barY - 2);
@@ -880,9 +895,7 @@ export class GameRenderer {
         // Status effect icons above health bars / name. Pooled in screen-space.
         const playerEffects = isLocal ? gameState.effectIds : (player.effectIds || []);
         if (playerEffects && playerEffects.length) {
-            const cxWorld = (player.pos.x || 0) + (player.size || PLAYER_SIZE) / 2;
-            const cyWorld = (player.pos.y || 0) + (player.size || PLAYER_SIZE) / 2;
-            const sc = this.worldToScreen(cxWorld, cyWorld, gameState);
+            const sc = this.worldToScreen(eCxWorld, eCyWorld, gameState);
             this._drawStatusIcons(playerEffects, sc.x, sc.y + iconAnchorY);
         }
 
@@ -896,7 +909,7 @@ export class GameRenderer {
 
         // Billboard container: counter-rotate so enemy faces camera
         const bb = new PIXI.Container();
-        bb.position.set(sx + size / 2, sy + size / 2);
+        bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
         const lx = -size / 2, ly = -size / 2;
 
@@ -984,7 +997,7 @@ export class GameRenderer {
 
         // Billboard container
         const bb = new PIXI.Container();
-        bb.position.set(sx + ox + size / 2, sy + oy + size / 2);
+        bb.position.set(Math.round(sx + ox + size / 2), Math.round(sy + oy + size / 2));
         bb.rotation = -angle;
         const lx = -size / 2, ly = -size / 2;
 
@@ -1027,7 +1040,7 @@ export class GameRenderer {
 
         // Billboard container
         const bb = new PIXI.Container();
-        bb.position.set(sx + size / 2, sy + size / 2);
+        bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
         const lx = -size / 2, ly = -size / 2;
 
