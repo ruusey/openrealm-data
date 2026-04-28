@@ -109,6 +109,10 @@ public class PlayerDataService {
         character.getStats().setWis(newData.getStats().getWis());
         character.getStats().setVit(newData.getStats().getVit());
         character.getStats().setXp(newData.getStats().getXp());
+        // Cosmetic dye id round-trips here too — without this line every
+        // character save would silently null it out, so a logout (or any
+        // other persist) would clear the player's dye.
+        character.getStats().setDyeId(newData.getStats().getDyeId());
 
         character.removeItems();
 

@@ -2909,23 +2909,35 @@ function createSlot(item, label, slotIdx, isLoot = false) {
     lbl.textContent = label;
     div.appendChild(lbl);
 
-    // Click / double-tap: single click = select/swap, double click/tap = consume
+    // Single click = select/swap, double-click/tap = consume.
+    // We use BOTH a manual timing window (for touch tap-tap reliability on
+    // mobile) AND the native dblclick event (more reliable on desktop where
+    // OS double-click intervals vary). They route through the same helper
+    // so behavior is identical.
     let lastClickTime = 0;
+    const tryConsume = () => {
+        if (!item || item.itemId < 0 || !item.consumable) return false;
+        if (slotIdx < 4 || slotIdx > 19) return false;
+        network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
+        lastInvKey = '';
+        lastClickTime = 0;
+        return true;
+    };
     div.addEventListener('click', (e) => {
         e.stopPropagation();
         // Skip click if we just finished a drag
         if (dragSlot >= 0) return;
         const now = Date.now();
-        if (now - lastClickTime < 350 && item && item.itemId >= 0 && item.consumable
-            && slotIdx >= 4 && slotIdx <= 19) {
-            // Double click/tap — consume the item
-            network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
-            lastInvKey = '';
-            lastClickTime = 0;
-            return;
-        }
+        if (now - lastClickTime < 400 && tryConsume()) return;
         lastClickTime = now;
         onSlotClick(slotIdx, item);
+    });
+    // Native double-click for desktop — fires regardless of OS settings.
+    div.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (dragSlot >= 0) return;
+        tryConsume();
     });
     // Right click (desktop) = drop
     div.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); onSlotRightClick(slotIdx, item); });
