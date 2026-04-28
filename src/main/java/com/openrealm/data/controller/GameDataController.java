@@ -121,6 +121,12 @@ public class GameDataController {
 		return saveDataFile("realm-events.json", json);
 	}
 
+	@PutMapping(value = "/class-masks", consumes = { "application/json" }, produces = { "application/json" })
+	@AdminRestricted(provisions = { AccountProvision.OPENREALM_EDITOR })
+	public ResponseEntity<?> saveClassMasks(final HttpServletRequest request, @RequestBody final String json) {
+		return saveDataFile("character-class-masks.json", json);
+	}
+
 	private ResponseEntity<?> saveDataFile(String filename, String json) {
 		try {
 			URL resource = getClass().getClassLoader().getResource("data/" + filename);

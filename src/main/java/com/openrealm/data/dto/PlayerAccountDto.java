@@ -28,6 +28,11 @@ public class PlayerAccountDto extends TemporalDto {
 	private String accountUuid;
 	private String accountName;
 
+	// Lifetime fame credited to the account when characters die. Used as a soft
+	// currency for cosmetics (dyes/cloths) and other unlocks. Per-character fame
+	// is computed from xp at death (ExperienceModel.getBaseFame) and added here.
+	private Long accountFame;
+
 	private List<ChestDto> playerVault;
 	private List<CharacterDto> characters;
 }

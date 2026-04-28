@@ -34,6 +34,13 @@ public class CharacterStatsDto extends TemporalDto{
 	private Integer vit;
 	private Integer wis;
 
+	// Cosmetic "dye id" — opaque integer keyed in the client's
+	// dye-assets.json registry. The registry maps id → recolor strategy
+	// (solid color, gradient, patterned cloth, etc.) so adding new cosmetics
+	// later doesn't require a wire-format change. 0 / null = no dye.
+	// Cleared on character death (character is deleted on permadeath).
+	private Integer dyeId;
+
 
 	public static CharacterStatsDto characterDefaults(final Integer characterClass) {
 		final CharacterClassModel model = GameDataManager.CHARACTER_CLASSES.get(characterClass);

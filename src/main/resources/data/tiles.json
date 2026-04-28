@@ -1856,10 +1856,11 @@
         "size": 32,
         "data": {
             "hasCollision": 0,
-            "slows": 0,
+            "slows": 1,
             "damaging": 1,
             "isWall": 0
-        }
+        },
+        "interactionType": null
     },
     {
         "tileId": 133,
@@ -1870,10 +1871,11 @@
         "size": 32,
         "data": {
             "hasCollision": 0,
-            "slows": 0,
+            "slows": 1,
             "damaging": 1,
             "isWall": 0
-        }
+        },
+        "interactionType": null
     },
     {
         "tileId": 134,
@@ -2317,11 +2319,12 @@
         "col": 8,
         "size": 32,
         "data": {
-            "hasCollision": 0,
+            "hasCollision": 1,
             "slows": 0,
             "damaging": 0,
             "isWall": 1
-        }
+        },
+        "interactionType": null
     },
     {
         "tileId": 166,

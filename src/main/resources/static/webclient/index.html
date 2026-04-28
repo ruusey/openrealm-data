@@ -151,6 +151,14 @@
             <span id="difficulty-skull">☠</span>
             <span id="difficulty-value">1.0</span>
         </div>
+        <!-- Account fame badge — lifetime fame banked from dead characters.
+             Sits between #difficulty-icon and the minimap. Hidden until we know
+             the value (set by updateHUD when account is loaded). -->
+        <div id="account-fame-display" style="display:none">
+            <span class="afd-icon">✦</span>
+            <span class="afd-value" id="account-fame-value">0</span>
+            <span class="afd-label">Fame</span>
+        </div>
         <!-- HUD Overlay -->
         <div id="hud">
             <div id="player-identity" style="padding:6px 8px;font-family:monospace;font-weight:bold;font-size:14px;color:#c8a86e;border-bottom:1px solid #333;margin-bottom:4px;text-shadow:1px 1px 2px #000;"></div>

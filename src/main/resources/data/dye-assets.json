@@ -1,0 +1,50 @@
+[
+	{
+		"dyeId": 1,
+		"name": "Green Dye",
+		"type": "solid",
+		"color": 4899402
+	},
+	{
+		"dyeId": 2,
+		"name": "Yellow Dye",
+		"type": "solid",
+		"color": 15126560
+	},
+	{
+		"dyeId": 3,
+		"name": "Red Dye",
+		"type": "solid",
+		"color": 14039608
+	},
+	{
+		"dyeId": 4,
+		"name": "Blue Dye",
+		"type": "solid",
+		"color": 3894496
+	},
+	{
+		"dyeId": 5,
+		"name": "Purple Dye",
+		"type": "solid",
+		"color": 10110920
+	},
+	{
+		"dyeId": 6,
+		"name": "Orange Dye",
+		"type": "solid",
+		"color": 15633968
+	},
+	{
+		"dyeId": 7,
+		"name": "White Dye",
+		"type": "solid",
+		"color": 15658734
+	},
+	{
+		"dyeId": 8,
+		"name": "Black Dye",
+		"type": "solid",
+		"color": 2105376
+	}
+]

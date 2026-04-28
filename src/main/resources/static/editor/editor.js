@@ -113,6 +113,13 @@ let dirtyLootTables = false;
 let animations = [];
 let selectedAnim = null;
 let dirtyAnimations = false;
+// Class dye masks: per-classId 8x8 grid where each cell is 0=none, 1=accessory, 2=clothing
+let classMasks = [];
+let selectedClassMask = null; // the entry being edited (built lazily from animations[] when missing)
+let dirtyClassMasks = false;
+let cmCurrentBrush = 1; // active paint brush: 0/1/2
+let cmIsDrawing = false;
+let cmIsErasing = false;
 let portals = [];
 let selectedPortal = null;
 let dirtyPortals = false;
@@ -180,7 +187,7 @@ const goToSheetBtn = document.getElementById('goToSheetBtn');
 // ========== INIT ==========
 async function init() {
   populateSheetSelect();
-  await Promise.all([loadTiles(), loadTerrains(), loadItems(), loadProjGroups(), loadMaps(), loadEnemies(), loadLootData(), loadAnimations(), loadPortals(), loadSetPieces(), loadRealmEvents(), loadImages()]);
+  await Promise.all([loadTiles(), loadTerrains(), loadItems(), loadProjGroups(), loadMaps(), loadEnemies(), loadLootData(), loadAnimations(), loadClassMasks(), loadPortals(), loadSetPieces(), loadRealmEvents(), loadImages()]);
   renderSheet();
   renderTileList();
   renderTerrainList();
@@ -249,6 +256,17 @@ async function loadAnimations() {
     animations = await (await fetch(`${BASE}/animations.json`)).json();
     animations.sort((a, b) => a.objectId - b.objectId);
     document.getElementById('animCount').textContent = animations.length;
+}
+
+async function loadClassMasks() {
+    try {
+        const res = await fetch(`${BASE}/character-class-masks.json`);
+        classMasks = res.ok ? await res.json() : [];
+    } catch (e) {
+        classMasks = [];
+    }
+    if (!Array.isArray(classMasks)) classMasks = [];
+    classMasks.sort((a, b) => (a.classId ?? 0) - (b.classId ?? 0));
 }
 
 async function loadLootData() {
@@ -3192,6 +3210,544 @@ function renderEnemyLootSection(enemy) {
   }
 }
 
+// ========== CLASS DYE MASKS ==========
+// Each entry: { classId, className, spriteKey, spriteSize, frames: Frame[] }
+// Frame: { row, col, animKeys: string[], mask: number[H][W] }
+//   - animKeys is informational ("idle_front[0]", "walk_side[1]", ...) — the
+//     mask is keyed by sheet position (row,col) so two animations sharing the
+//     same cell share the same mask automatically.
+//   - mask values: 0 = none, 1 = accessory dye, 2 = clothing dye
+//
+// Editing is per-frame because the body shifts between animation frames; one
+// global mask wouldn't track the moving pixels. Auto-seed-by-eye-row works
+// per frame and there's a class-wide "Auto-seed all" + "Copy from" to make
+// painting tractable across the ~15-25 frames a class typically has.
+
+let cmSelectedFrameIdx = 0; // index into selectedClassMask.frames
+
+function _cmCollectFrames(classId) {
+  // Walk every animation set's frames and produce a deduped list keyed by
+  // sheet position. Returns array of { row, col, animKeys, spriteKey, spriteSize, spriteHeight, className }.
+  const a = animations.find(x => x.objectType === 'player' && x.objectId === classId);
+  if (!a || !a.animations) return [];
+  const ss = a.spriteSize || 8;
+  const sh = a.spriteHeight || ss;
+  const byKey = new Map();
+  for (const animName of Object.keys(a.animations)) {
+    const set = a.animations[animName];
+    if (!set || !set.frames) continue;
+    set.frames.forEach((f, idx) => {
+      if (f.row == null || f.col == null) return;
+      const k = f.row + '_' + f.col;
+      if (!byKey.has(k)) {
+        byKey.set(k, {
+          row: f.row, col: f.col, animKeys: [],
+          spriteKey: a.spriteKey, spriteSize: ss, spriteHeight: sh, className: a.className,
+        });
+      }
+      byKey.get(k).animKeys.push(`${animName}[${idx}]`);
+    });
+  }
+  // Stable order: top-to-bottom, left-to-right.
+  return Array.from(byKey.values()).sort((p, q) => p.row - q.row || p.col - q.col);
+}
+
+function _cmEnsureEntry(classId) {
+  let entry = classMasks.find(m => m.classId === classId);
+  const canonFrames = _cmCollectFrames(classId);
+  if (!canonFrames.length) return null;
+  const ss = canonFrames[0].spriteSize;
+  const sh = canonFrames[0].spriteHeight;
+  if (!entry) {
+    entry = {
+      classId,
+      className: canonFrames[0].className,
+      spriteKey: canonFrames[0].spriteKey,
+      spriteSize: ss,
+      frames: [],
+    };
+    classMasks.push(entry);
+    classMasks.sort((a, b) => (a.classId ?? 0) - (b.classId ?? 0));
+  }
+  // Migrate any legacy single-mask entries (from the older single-frame
+  // schema) into frames[0] so existing data keeps working.
+  if (entry.mask && (!entry.frames || entry.frames.length === 0)) {
+    entry.frames = [{
+      row: entry.row ?? 0, col: entry.col ?? 0,
+      animKeys: ['(legacy)'],
+      mask: entry.mask,
+    }];
+    delete entry.mask; delete entry.row; delete entry.col;
+  }
+  if (!entry.frames) entry.frames = [];
+  // Reconcile against the canonical frame list — add any missing frames with
+  // a blank mask, update animKeys on existing ones (animations may have been
+  // edited since last save).
+  const existingByKey = new Map(entry.frames.map(f => [f.row + '_' + f.col, f]));
+  const merged = [];
+  for (const cf of canonFrames) {
+    const k = cf.row + '_' + cf.col;
+    let frame = existingByKey.get(k);
+    if (!frame) {
+      const mask = Array.from({ length: sh }, () => new Array(ss).fill(0));
+      frame = { row: cf.row, col: cf.col, animKeys: cf.animKeys, mask };
+    } else {
+      frame.animKeys = cf.animKeys; // refresh
+    }
+    merged.push(frame);
+  }
+  entry.frames = merged;
+  return entry;
+}
+
+function _cmFrame() {
+  if (!selectedClassMask) return null;
+  return selectedClassMask.frames[cmSelectedFrameIdx] || null;
+}
+
+function _cmCountMaskCells(mask) {
+  let acc = 0, cloth = 0;
+  if (!mask) return { acc, cloth };
+  for (const row of mask) for (const v of row) {
+    if (v === 1) acc++;
+    else if (v === 2) cloth++;
+  }
+  return { acc, cloth };
+}
+
+function _cmFramePainted(frame) {
+  if (!frame) return false;
+  for (const row of frame.mask) for (const v of row) if (v !== 0) return true;
+  return false;
+}
+
+function renderClassMaskList(filter = '') {
+  const list = document.getElementById('cmListView');
+  list.innerHTML = '';
+  const lower = (filter || '').toLowerCase();
+  // Drive the list from the player animations so every class shows up,
+  // even ones that don't have a mask saved yet.
+  const players = animations.filter(a => a.objectType === 'player').sort((a, b) => a.objectId - b.objectId);
+  document.getElementById('cmCount').textContent = players.length;
+  players.forEach(a => {
+    const label = a.className || ('class:' + a.objectId);
+    if (lower && !label.toLowerCase().includes(lower) && !String(a.objectId).includes(lower)) return;
+    const entry = classMasks.find(m => m.classId === a.objectId);
+    const totalFrames = _cmCollectFrames(a.objectId).length;
+    let painted = 0;
+    if (entry && entry.frames) {
+      for (const f of entry.frames) if (_cmFramePainted(f)) painted++;
+    }
+    const status = totalFrames === 0
+      ? '(no frames)'
+      : `${painted} / ${totalFrames} frames painted`;
+    const row = document.createElement('div');
+    row.className = 'tile-row';
+    const id = document.createElement('span'); id.className = 'tile-id'; id.textContent = a.objectId;
+    const name = document.createElement('span'); name.className = 'tile-name'; name.textContent = label;
+    const stat = document.createElement('span');
+    stat.style.cssText = 'color:#888;font-size:11px';
+    stat.textContent = status;
+    row.append(id, name, stat);
+    row.addEventListener('click', () => selectClassMask(a.objectId));
+    list.appendChild(row);
+  });
+}
+
+function selectClassMask(classId) {
+  const entry = _cmEnsureEntry(classId);
+  if (!entry) return;
+  selectedClassMask = entry;
+  cmSelectedFrameIdx = 0;
+  document.getElementById('cmListView').style.display = 'none';
+  document.querySelector('#classmasksTab .tile-header').style.display = 'none';
+  document.getElementById('cmDetail').style.display = '';
+  showClassMaskDetail(entry);
+}
+
+function deselectClassMask() {
+  selectedClassMask = null;
+  document.getElementById('cmDetail').style.display = 'none';
+  document.getElementById('cmListView').style.display = '';
+  document.querySelector('#classmasksTab .tile-header').style.display = '';
+  renderClassMaskList(document.getElementById('cmSearch').value);
+}
+
+function showClassMaskDetail(entry) {
+  document.getElementById('cmDetailTitle').textContent = entry.className || ('Class ' + entry.classId);
+  document.getElementById('cmClassId').value = entry.classId;
+  document.getElementById('cmSpriteKey').value = entry.spriteKey;
+  renderFrameList(entry);
+  populateCopyFromOptions(entry);
+  drawCurrentFrame();
+}
+
+function drawCurrentFrame() {
+  const frame = _cmFrame();
+  const labelEl = document.getElementById('cmFrameLabel');
+  const rcEl = document.getElementById('cmRowColLabel');
+  if (!frame) {
+    labelEl.textContent = '(no frame)';
+    rcEl.textContent = '-';
+    return;
+  }
+  labelEl.textContent = frame.animKeys.join(', ');
+  rcEl.textContent = `r${frame.row}, c${frame.col}`;
+  drawClassMaskSprite();
+  drawClassMaskOverlay();
+  drawClassMaskPreview();
+  updateMaskCounts();
+  updateClassTotals();
+}
+
+function renderFrameList(entry) {
+  const list = document.getElementById('cmFrameList');
+  list.innerHTML = '';
+  if (!entry.frames || !entry.frames.length) {
+    list.innerHTML = '<div style="color:#888;font-size:11px;padding:6px">No frames found in animations.json for this class.</div>';
+    return;
+  }
+  const ss = entry.spriteSize || 8;
+  const sh = (entry.frames[0].mask && entry.frames[0].mask.length) || ss;
+  const img = images[entry.spriteKey];
+  entry.frames.forEach((f, idx) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px;border-radius:3px;cursor:pointer;margin-bottom:2px;' +
+      (idx === cmSelectedFrameIdx ? 'background:#2a2030;border:1px solid #c8a86e' : 'border:1px solid transparent');
+    // Thumbnail: 32×32 sprite + faint mask overlay
+    const thumb = document.createElement('canvas');
+    thumb.width = 32; thumb.height = 32;
+    const tctx = thumb.getContext('2d');
+    tctx.imageSmoothingEnabled = false;
+    if (img) tctx.drawImage(img, f.col * ss, f.row * sh, ss, sh, 0, 0, 32, 32);
+    // Mask tint
+    const cellW = 32 / ss, cellH = 32 / sh;
+    for (let y = 0; y < f.mask.length; y++) {
+      for (let x = 0; x < (f.mask[y] || []).length; x++) {
+        const v = f.mask[y][x];
+        if (v === 1) tctx.fillStyle = 'rgba(255,90,40,0.45)';
+        else if (v === 2) tctx.fillStyle = 'rgba(60,140,255,0.45)';
+        else continue;
+        tctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+      }
+    }
+    const label = document.createElement('div');
+    label.style.cssText = 'flex:1;min-width:0;font-size:10px';
+    const animsText = f.animKeys.join(', ');
+    const painted = _cmFramePainted(f);
+    const dot = painted ? '<span style="color:#8f8">●</span>' : '<span style="color:#555">○</span>';
+    label.innerHTML = `<div style="color:#c8a86e;font-weight:bold">r${f.row}c${f.col} ${dot}</div>` +
+                     `<div style="color:#888;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${animsText}">${animsText}</div>`;
+    row.appendChild(thumb);
+    row.appendChild(label);
+    row.addEventListener('click', () => {
+      cmSelectedFrameIdx = idx;
+      renderFrameList(entry);
+      drawCurrentFrame();
+    });
+    list.appendChild(row);
+  });
+}
+
+function populateCopyFromOptions(entry) {
+  const sel = document.getElementById('cmCopyFromSelect');
+  sel.innerHTML = '';
+  if (!entry.frames) return;
+  entry.frames.forEach((f, idx) => {
+    const opt = document.createElement('option');
+    opt.value = String(idx);
+    const painted = _cmFramePainted(f);
+    opt.textContent = `${painted ? '●' : '○'} r${f.row}c${f.col} (${f.animKeys[0] || '-'})`;
+    sel.appendChild(opt);
+  });
+}
+
+function drawClassMaskSprite() {
+  const cvs = document.getElementById('cmSpriteCanvas');
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  const frame = _cmFrame();
+  if (!frame || !selectedClassMask) return;
+  const img = images[selectedClassMask.spriteKey];
+  if (!img) return;
+  const ss = selectedClassMask.spriteSize || 8;
+  const sh = frame.mask.length || ss;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, frame.col * ss, frame.row * sh, ss, sh, 0, 0, cvs.width, cvs.height);
+}
+
+function drawClassMaskOverlay() {
+  const cvs = document.getElementById('cmMaskCanvas');
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  const frame = _cmFrame();
+  if (!frame || !selectedClassMask) return;
+  const ss = selectedClassMask.spriteSize || 8;
+  const sh = frame.mask.length || ss;
+  const cellW = cvs.width / ss;
+  const cellH = cvs.height / sh;
+  // Faint grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= ss; x++) { ctx.beginPath(); ctx.moveTo(x * cellW, 0); ctx.lineTo(x * cellW, cvs.height); ctx.stroke(); }
+  for (let y = 0; y <= sh; y++) { ctx.beginPath(); ctx.moveTo(0, y * cellH); ctx.lineTo(cvs.width, y * cellH); ctx.stroke(); }
+  // Mask tints — accessory red, clothing blue
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < ss; x++) {
+      const v = frame.mask[y][x];
+      if (v === 1) ctx.fillStyle = 'rgba(255,90,40,0.45)';
+      else if (v === 2) ctx.fillStyle = 'rgba(60,140,255,0.45)';
+      else continue;
+      ctx.fillRect(x * cellW, y * cellH, cellW, cellH);
+    }
+  }
+}
+
+function drawClassMaskPreview() {
+  // Apply a hue-shifted recolor to mask pixels so the user can see what dyes
+  // would do. Accessory tinted to red-orange, clothing to blue. Visual sanity
+  // check only — the final renderer will use player-chosen colors.
+  const cvs = document.getElementById('cmPreviewCanvas');
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  const frame = _cmFrame();
+  if (!frame || !selectedClassMask) return;
+  const img = images[selectedClassMask.spriteKey];
+  if (!img) return;
+  const ss = selectedClassMask.spriteSize || 8;
+  const sh = frame.mask.length || ss;
+  const off = document.createElement('canvas');
+  off.width = ss; off.height = sh;
+  const offCtx = off.getContext('2d');
+  offCtx.imageSmoothingEnabled = false;
+  offCtx.drawImage(img, frame.col * ss, frame.row * sh, ss, sh, 0, 0, ss, sh);
+  const data = offCtx.getImageData(0, 0, ss, sh);
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < ss; x++) {
+      const i = (y * ss + x) * 4;
+      if (data.data[i + 3] === 0) continue;
+      const v = frame.mask[y][x];
+      if (v === 0) continue;
+      const r = data.data[i], g = data.data[i + 1], b = data.data[i + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (v === 1) {
+        data.data[i] = Math.min(255, lum * 1.2);
+        data.data[i + 1] = lum * 0.4;
+        data.data[i + 2] = lum * 0.2;
+      } else if (v === 2) {
+        data.data[i] = lum * 0.2;
+        data.data[i + 1] = lum * 0.5;
+        data.data[i + 2] = Math.min(255, lum * 1.3);
+      }
+    }
+  }
+  offCtx.putImageData(data, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(off, 0, 0, cvs.width, cvs.height);
+}
+
+function updateMaskCounts() {
+  const frame = _cmFrame();
+  const { acc, cloth } = _cmCountMaskCells(frame && frame.mask);
+  document.getElementById('cmAccCount').textContent = acc;
+  document.getElementById('cmClothCount').textContent = cloth;
+}
+
+function updateClassTotals() {
+  if (!selectedClassMask) return;
+  const total = selectedClassMask.frames.length;
+  let painted = 0;
+  for (const f of selectedClassMask.frames) if (_cmFramePainted(f)) painted++;
+  document.getElementById('cmPaintedFrames').textContent = painted;
+  document.getElementById('cmTotalFrames').textContent = total;
+}
+
+function _cmCellFromEvent(e) {
+  const frame = _cmFrame();
+  if (!frame) return null;
+  const cvs = document.getElementById('cmMaskCanvas');
+  const rect = cvs.getBoundingClientRect();
+  const ss = selectedClassMask.spriteSize || 8;
+  const sh = frame.mask.length || ss;
+  const x = Math.floor((e.clientX - rect.left) / rect.width * ss);
+  const y = Math.floor((e.clientY - rect.top) / rect.height * sh);
+  if (x < 0 || x >= ss || y < 0 || y >= sh) return null;
+  return { x, y };
+}
+
+function paintClassMaskCell(x, y, value) {
+  const frame = _cmFrame();
+  if (!frame || !frame.mask[y]) return;
+  if (frame.mask[y][x] === value) return;
+  frame.mask[y][x] = value;
+  drawClassMaskOverlay();
+  drawClassMaskPreview();
+  updateMaskCounts();
+  // Cheap incremental update: just redraw the frame strip + class totals so
+  // the painted-dot indicator + counts update live without a full rebuild.
+  renderFrameList(selectedClassMask);
+  populateCopyFromOptions(selectedClassMask);
+  updateClassTotals();
+  markDirty('classMasks');
+}
+
+function _cmEyeRowSeed(frame) {
+  // Find the row with the highest count of "dark" pixels (luminance < 60 with
+  // alpha > 0) on this frame. Mark every non-transparent pixel above as
+  // accessory (1) and below as clothing (2); leave the eye row itself as 0.
+  // Returns true on success, false if no recognizable eye row.
+  if (!selectedClassMask) return false;
+  const img = images[selectedClassMask.spriteKey];
+  if (!img) return false;
+  const ss = selectedClassMask.spriteSize || 8;
+  const sh = frame.mask.length || ss;
+  const off = document.createElement('canvas');
+  off.width = ss; off.height = sh;
+  const offCtx = off.getContext('2d');
+  offCtx.imageSmoothingEnabled = false;
+  offCtx.drawImage(img, frame.col * ss, frame.row * sh, ss, sh, 0, 0, ss, sh);
+  const data = offCtx.getImageData(0, 0, ss, sh).data;
+  let bestRow = -1, bestCount = 0;
+  for (let y = 0; y < sh; y++) {
+    let darkCount = 0;
+    for (let x = 0; x < ss; x++) {
+      const i = (y * ss + x) * 4;
+      if (data[i + 3] === 0) continue;
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      if (lum < 60) darkCount++;
+    }
+    if (darkCount > bestCount) { bestCount = darkCount; bestRow = y; }
+  }
+  if (bestRow < 0 || bestCount < 2) return false;
+  for (let y = 0; y < sh; y++) {
+    for (let x = 0; x < ss; x++) {
+      const i = (y * ss + x) * 4;
+      if (data[i + 3] === 0) { frame.mask[y][x] = 0; continue; }
+      if (y < bestRow) frame.mask[y][x] = 1;
+      else if (y > bestRow) frame.mask[y][x] = 2;
+      else frame.mask[y][x] = 0;
+    }
+  }
+  return true;
+}
+
+function autoSeedCurrentFrame() {
+  const frame = _cmFrame();
+  if (!frame) return;
+  if (!_cmEyeRowSeed(frame)) {
+    alert('Could not auto-detect an eye row on this frame (not enough dark pixels). Paint manually or copy from another frame.');
+    return;
+  }
+  drawClassMaskOverlay();
+  drawClassMaskPreview();
+  updateMaskCounts();
+  renderFrameList(selectedClassMask);
+  populateCopyFromOptions(selectedClassMask);
+  updateClassTotals();
+  markDirty('classMasks');
+}
+
+function autoSeedAllFrames() {
+  if (!selectedClassMask) return;
+  if (!confirm('Run eye-row auto-seed on every frame in this class? Frames where detection fails will be left as-is.')) return;
+  let succeeded = 0, failed = 0;
+  for (const f of selectedClassMask.frames) {
+    if (_cmEyeRowSeed(f)) succeeded++; else failed++;
+  }
+  drawCurrentFrame();
+  renderFrameList(selectedClassMask);
+  populateCopyFromOptions(selectedClassMask);
+  markDirty('classMasks');
+  alert(`Auto-seed complete: ${succeeded} frame(s) seeded, ${failed} skipped (no eye row detected).`);
+}
+
+function copyMaskFromFrame() {
+  if (!selectedClassMask) return;
+  const sel = document.getElementById('cmCopyFromSelect');
+  const srcIdx = parseInt(sel.value, 10);
+  if (!Number.isFinite(srcIdx) || srcIdx === cmSelectedFrameIdx) return;
+  const src = selectedClassMask.frames[srcIdx];
+  const dst = _cmFrame();
+  if (!src || !dst) return;
+  // Copy cell-by-cell — frame masks are the same dimensions because all
+  // frames share the class's spriteSize/spriteHeight.
+  for (let y = 0; y < dst.mask.length; y++) {
+    for (let x = 0; x < dst.mask[y].length; x++) {
+      dst.mask[y][x] = (src.mask[y] && src.mask[y][x]) || 0;
+    }
+  }
+  drawClassMaskOverlay();
+  drawClassMaskPreview();
+  updateMaskCounts();
+  renderFrameList(selectedClassMask);
+  populateCopyFromOptions(selectedClassMask);
+  updateClassTotals();
+  markDirty('classMasks');
+}
+
+function _cmBindOnce() {
+  if (window._cmBound) return;
+  window._cmBound = true;
+  document.getElementById('cmBackBtn').addEventListener('click', deselectClassMask);
+  document.getElementById('cmSearch').addEventListener('input', e => renderClassMaskList(e.target.value));
+  document.getElementById('cmAutoSeedBtn').addEventListener('click', autoSeedCurrentFrame);
+  document.getElementById('cmAutoSeedAllBtn').addEventListener('click', autoSeedAllFrames);
+  document.getElementById('cmCopyFromBtn').addEventListener('click', copyMaskFromFrame);
+  document.getElementById('cmClearBtn').addEventListener('click', () => {
+    const frame = _cmFrame();
+    if (!frame) return;
+    if (!confirm('Clear all mask pixels for this frame?')) return;
+    for (const row of frame.mask) row.fill(0);
+    drawClassMaskOverlay();
+    drawClassMaskPreview();
+    updateMaskCounts();
+    renderFrameList(selectedClassMask);
+    populateCopyFromOptions(selectedClassMask);
+    updateClassTotals();
+    markDirty('classMasks');
+  });
+  document.getElementById('applyCmBtn').addEventListener('click', () => {
+    // No structural changes here — the mask grid is mutated in place. Apply
+    // is just a visual confirmation; "Save All" is what writes to disk.
+    document.getElementById('saveStatus').textContent = 'Mask updated (use Save All)';
+    document.getElementById('saveStatus').style.color = '#8f8';
+  });
+  document.querySelectorAll('.cm-brush').forEach(btn => {
+    btn.addEventListener('click', () => {
+      cmCurrentBrush = parseInt(btn.dataset.brush, 10);
+      document.querySelectorAll('.cm-brush').forEach(b => {
+        const v = parseInt(b.dataset.brush, 10);
+        if (v === cmCurrentBrush) {
+          b.classList.add('active');
+          if (v === 0) { b.style.background = '#444'; b.style.color = '#fff'; b.style.border = '1px solid #888'; }
+          else if (v === 1) { b.style.background = '#8a4a3a'; b.style.color = '#fff'; b.style.border = '1px solid #c87060'; }
+          else if (v === 2) { b.style.background = '#3a4a8a'; b.style.color = '#fff'; b.style.border = '1px solid #6080c8'; }
+        } else {
+          b.classList.remove('active');
+          b.style.background = '';
+          b.style.color = '';
+          b.style.border = '';
+        }
+      });
+    });
+  });
+  const mc = document.getElementById('cmMaskCanvas');
+  mc.addEventListener('contextmenu', e => e.preventDefault());
+  mc.addEventListener('mousedown', e => {
+    if (!_cmFrame()) return;
+    cmIsDrawing = true;
+    cmIsErasing = (e.button === 2);
+    const cell = _cmCellFromEvent(e);
+    if (cell) paintClassMaskCell(cell.x, cell.y, cmIsErasing ? 0 : cmCurrentBrush);
+  });
+  window.addEventListener('mouseup', () => { cmIsDrawing = false; cmIsErasing = false; });
+  mc.addEventListener('mousemove', e => {
+    if (!cmIsDrawing || !_cmFrame()) return;
+    const cell = _cmCellFromEvent(e);
+    if (cell) paintClassMaskCell(cell.x, cell.y, cmIsErasing ? 0 : cmCurrentBrush);
+  });
+}
+
 // ========== TABS ==========
 // ========== PORTALS EDITOR ==========
 async function loadPortals() {
@@ -3620,11 +4176,13 @@ function switchTab(tab) {
   document.getElementById('projgroupsTab').style.display = tab === 'projgroups' ? '' : 'none';
   document.getElementById('lootgroupsTab').style.display = tab === 'lootgroups' ? '' : 'none';
   document.getElementById('animationsTab').style.display = tab === 'animations' ? '' : 'none';
+  document.getElementById('classmasksTab').style.display = tab === 'classmasks' ? '' : 'none';
   document.getElementById('portalsTab').style.display = tab === 'portals' ? '' : 'none';
   document.getElementById('setpiecesTab').style.display = tab === 'setpieces' ? '' : 'none';
   document.getElementById('realmeventsTab').style.display = tab === 'realmevents' ? '' : 'none';
   if (tab === 'lootgroups') renderLgList();
   if (tab === 'animations') renderAnimList();
+  if (tab === 'classmasks') renderClassMaskList();
   if (tab === 'portals') renderPortalList();
   if (tab === 'setpieces') renderSetPieceList();
   if (tab === 'realmevents') renderRealmEventList();
@@ -3641,6 +4199,7 @@ function markDirty(which) {
   if (which === 'lootGroups') dirtyLootGroups = true;
   if (which === 'lootTables') dirtyLootTables = true;
   if (which === 'animations') dirtyAnimations = true;
+  if (which === 'classMasks') dirtyClassMasks = true;
   if (which === 'portals') dirtyPortals = true;
   if (which === 'setpieces') dirtySetPieces = true;
   if (which === 'realmEvents') dirtyRealmEvents = true;
@@ -3695,6 +4254,7 @@ async function saveAll() {
     { dirty: () => dirtyLootGroups,  clear: () => { dirtyLootGroups = false; },  endpoint: '/gamedata/lootgroups',  filename: 'loot-groups.json',  data: lootGroups,  indent: '\t',  label: 'loot groups' },
     { dirty: () => dirtyLootTables,  clear: () => { dirtyLootTables = false; },  endpoint: '/gamedata/loottables',  filename: 'loot-tables.json',  data: lootTables,  indent: '\t',  label: 'loot tables' },
     { dirty: () => dirtyAnimations,  clear: () => { dirtyAnimations = false; },  endpoint: '/gamedata/animations',  filename: 'animations.json',   data: animations,  indent: '\t',  label: 'animations' },
+    { dirty: () => dirtyClassMasks,  clear: () => { dirtyClassMasks = false; },  endpoint: '/gamedata/class-masks', filename: 'character-class-masks.json', data: classMasks, indent: '\t', label: 'class masks' },
     { dirty: () => dirtyPortals,     clear: () => { dirtyPortals = false; },     endpoint: '/gamedata/portals',     filename: 'portals.json',      data: portals,     indent: '\t',  label: 'portals' },
     { dirty: () => dirtySetPieces,   clear: () => { dirtySetPieces = false; },   endpoint: '/gamedata/setpieces',   filename: 'setpieces.json',    data: setpieces,   indent: '\t',  label: 'set pieces' },
     { dirty: () => dirtyRealmEvents, clear: () => { dirtyRealmEvents = false; }, endpoint: '/gamedata/realm-events', filename: 'realm-events.json', data: realmEvents, indent: '\t',  label: 'realm events' },
@@ -3740,6 +4300,9 @@ function bindEvents() {
   sheetSelect.addEventListener('change', () => { currentSheet = sheetSelect.value; renderSheet(); });
   gridSizeSelect.addEventListener('change', () => { gridSize = parseInt(gridSizeSelect.value) || 8; renderSheet(); });
   document.getElementById('gridHeight').addEventListener('change', () => { gridHeight = parseInt(document.getElementById('gridHeight').value) || 0; renderSheet(); });
+
+  // Class dye mask UI bindings.
+  _cmBindOnce();
 
   // Tabs
   document.querySelectorAll('.tab').forEach(btn => {

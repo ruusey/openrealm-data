@@ -3,7 +3,11 @@
 // Projectile behavior flags — control how a bullet moves (stored in Bullet.flags)
 export const ProjectileFlag = {
     PLAYER_PROJECTILE: 10, PARAMETRIC: 12, INVERTED_PARAMETRIC: 13, ORBITAL: 20,
-    ARMOR_PIERCING: 23, PASS_THROUGH_TERRAIN: 24
+    ARMOR_PIERCING: 23, PASS_THROUGH_TERRAIN: 24,
+    // Pierces every enemy on its path (server tracks per-enemy hit dedup).
+    // Client uses this to skip the local "delete on first enemy hit" behavior
+    // for predicted player bullets so the visual matches the server.
+    PASS_THROUGH_ENEMIES: 25
 };
 
 // Entity status effects — applied on-hit or from abilities (stored in entity.effectIds)
@@ -522,6 +526,7 @@ export class GameState {
                     existing.name = p.name;
                     existing.chatRole = p.chatRole;
                     existing.size = p.size || 28;
+                    existing.dyeId = p.dyeId || 0;
                     continue;
                 }
             }
@@ -1186,12 +1191,18 @@ export class GameState {
             // in RealmManagerServer.java exactly.
             const isPlayerBullet = b._predicted || (b.flags && b.flags.includes(ProjectileFlag.PLAYER_PROJECTILE));
             if (!isPlayerBullet) continue;
+            // Pierce flag: bullet hits every enemy on its path. Mirrors the
+            // server's PASS_THROUGH_ENEMIES handling — _hitEnemyIds tracks
+            // which enemies this bullet has already damaged so a single bullet
+            // never double-hits a target while passing through.
+            const piercesEnemies = b.flags && b.flags.includes(ProjectileFlag.PASS_THROUGH_ENEMIES);
             const bSize = b.size || 4;
             const br = bSize * BULLET_HIT_RADIUS_FACTOR;
             const bcx = b.pos.x + bSize * 0.5;
             const bcy = b.pos.y + bSize * 0.5;
             for (const [eid, enemy] of this.enemies) {
                 if (!enemy.pos) continue;
+                if (piercesEnemies && b._hitEnemyIds && b._hitEnemyIds.has(eid)) continue;
                 const eSize = enemy.size || 32;
                 const er = eSize * BULLET_HIT_RADIUS_FACTOR;
                 const ecx = enemy.pos.x + eSize * 0.5;
@@ -1219,8 +1230,15 @@ export class GameState {
                         });
 
                     }
-                    this.bullets.delete(id);
-                    break;
+                    if (piercesEnemies) {
+                        if (!b._hitEnemyIds) b._hitEnemyIds = new Set();
+                        b._hitEnemyIds.add(eid);
+                        // keep flying — don't break, the bullet may overlap
+                        // multiple enemies in this same tick
+                    } else {
+                        this.bullets.delete(id);
+                        break;
+                    }
                 }
             }
         }

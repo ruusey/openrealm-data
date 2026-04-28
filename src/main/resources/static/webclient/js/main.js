@@ -72,6 +72,15 @@ function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(`${name}-screen`).classList.add('active');
     currentScreen = name;
+    // The difficulty icon and account-fame badge are fixed-position overlays
+    // that live OUTSIDE the screen containers, so they don't auto-hide on
+    // screen change. Only reveal them while playing — updateHUD() will set
+    // display:'' on the fame badge once it has a value. Difficulty icon stays
+    // managed by its existing show/hide path.
+    if (name !== 'game') {
+        const fameEl = document.getElementById('account-fame-display');
+        if (fameEl) fameEl.style.display = 'none';
+    }
 }
 
 // Auto-login using saved session token
@@ -393,7 +402,11 @@ function showCharacterSelect() {
     if (account) {
         const name = account.accountName || 'Unknown';
         const email = account.email || '';
-        document.getElementById('account-display-info').innerHTML = `${name} - ${email}`;
+        const af = (Number.isFinite(Number(account.accountFame))) ? Number(account.accountFame) : 0;
+        const fameLine = af > 0
+            ? `<div style="font-size:11px;color:#c8a86e;margin-top:4px">✦ ${af.toLocaleString()} Account Fame</div>`
+            : '';
+        document.getElementById('account-display-info').innerHTML = `${name} - ${email}${fameLine}`;
     }
 
     // Split characters into alive and dead
@@ -2053,6 +2066,22 @@ function updateHUD() {
     const identityEl = document.getElementById('player-identity');
     if (identityEl) {
         identityEl.textContent = `${pName}  Lv. ${level}  ${className}`;
+    }
+
+    // Account fame badge — lifetime fame banked from dead characters. Source
+    // of truth is the REST account payload (account.accountFame), which gets
+    // refreshed on death/return-to-charselect. Hidden when null/zero so new
+    // accounts don't see an empty badge.
+    const fameEl = document.getElementById('account-fame-display');
+    if (fameEl) {
+        const af = (account && Number.isFinite(Number(account.accountFame))) ? Number(account.accountFame) : 0;
+        if (af > 0) {
+            const valEl = document.getElementById('account-fame-value');
+            if (valEl) valEl.textContent = af.toLocaleString();
+            fameEl.style.display = '';
+        } else {
+            fameEl.style.display = 'none';
+        }
     }
 
     // HP bar - max HP from computed stats

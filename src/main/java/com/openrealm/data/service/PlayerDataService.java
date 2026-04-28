@@ -254,6 +254,18 @@ public class PlayerDataService {
     }
 
     public void deleteCharacter(final HttpServletRequest request, final String characterUuid) throws Exception {
+        this.deleteCharacter(request, characterUuid, false);
+    }
+
+    /**
+     * Delete a character. When {@code bankFame} is true, the character's fame
+     * (computed from its banked xp via {@link com.openrealm.game.model.ExperienceModel#getBaseFame})
+     * is added to the owning account's lifetime {@code accountFame} total
+     * before the character is marked deleted. The game server passes this flag
+     * on permadeath; user-initiated deletes from the character-select screen
+     * leave it false (no fame credit for self-deletes).
+     */
+    public void deleteCharacter(final HttpServletRequest request, final String characterUuid, final boolean bankFame) throws Exception {
         final long start = Instant.now().toEpochMilli();
         final PlayerAccountEntity account = this.playerAccountRepository.findByCharactersCharacterUuid(characterUuid);
         if (!this.authFilter.accountGuidMatch(account.getAccountUuid(), request)) {
@@ -263,7 +275,24 @@ public class PlayerDataService {
                 .filter(character -> character.getCharacterUuid().equals(characterUuid)).findAny();
         if (characterToDelete.isEmpty())
             throw new Exception("Player character with UUID " + characterUuid + " does not exist");
-        characterToDelete.get().setDeleted(new Date(Instant.now().toEpochMilli()));
+        final CharacterEntity character = characterToDelete.get();
+        if (bankFame) {
+            try {
+                final long xp = (character.getStats() != null && character.getStats().getXp() != null)
+                        ? character.getStats().getXp() : 0L;
+                final long earned = GameDataManager.EXPERIENCE_LVLS.getBaseFame(xp);
+                if (earned > 0) {
+                    final long prev = account.getAccountFame() == null ? 0L : account.getAccountFame();
+                    account.setAccountFame(prev + earned);
+                    PlayerDataService.log.info("Banked {} fame to account {} from dying character {} (xp={}, total now {})",
+                            earned, account.getAccountUuid(), characterUuid, xp, prev + earned);
+                }
+            } catch (Exception fameEx) {
+                // Don't fail the whole delete if fame banking blows up — log and proceed.
+                PlayerDataService.log.warn("Failed to bank fame for dying character {}: {}", characterUuid, fameEx.getMessage());
+            }
+        }
+        character.setDeleted(new Date(Instant.now().toEpochMilli()));
         PlayerDataService.log.info("Successfully deleted character {} in {}ms", characterUuid,
                 (Instant.now().toEpochMilli() - start));
         this.playerAccountRepository.save(account);
@@ -314,6 +343,28 @@ public class PlayerDataService {
 
         account.setPlayerVault(chests);
         return this.saveAccount(account);
+    }
+
+    /**
+     * Atomically deduct fame from an account. Returns the new total. Throws if
+     * the account doesn't exist or has insufficient fame. Used by the game
+     * server to charge for fame-shop purchases — the server only commits the
+     * inventory grant after this call succeeds, so a failed deduction = no
+     * item granted.
+     */
+    public synchronized Long spendAccountFame(final String accountUuid, final long amount) throws Exception {
+        if (amount <= 0) throw new Exception("Fame spend amount must be positive");
+        final PlayerAccountEntity account = this.playerAccountRepository.findByAccountUuid(accountUuid);
+        if (account == null) throw new Exception("Account " + accountUuid + " not found");
+        final long current = account.getAccountFame() == null ? 0L : account.getAccountFame();
+        if (current < amount) {
+            throw new Exception("Insufficient fame: have " + current + ", need " + amount);
+        }
+        account.setAccountFame(current - amount);
+        this.playerAccountRepository.save(account);
+        PlayerDataService.log.info("Spent {} fame from account {} (was {}, now {})",
+                amount, accountUuid, current, current - amount);
+        return current - amount;
     }
 
     public PlayerAccountDto saveAccount(final PlayerAccountDto dto) {

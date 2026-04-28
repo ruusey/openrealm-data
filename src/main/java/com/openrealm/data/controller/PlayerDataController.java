@@ -155,11 +155,33 @@ public class PlayerDataController {
         return res;
     }
 
-    @DeleteMapping(value = "/account/character/{characterUuid}", produces = { "application/json" })
-    public ResponseEntity<?> deleteCharacter(final HttpServletRequest request, @PathVariable String characterUuid) {
+    /**
+     * Spend account fame. Used by the game server to charge for fame-shop
+     * purchases. Requires admin/data-server credentials — never invoked
+     * directly by the webclient (purchases go through the game server's
+     * BuyFameItem packet, which validates inventory and grants the item only
+     * after this call succeeds). Returns the new account fame total.
+     */
+    @PostMapping(value = "/account/{accountUuid}/fame/spend", produces = { "application/json" })
+    @AdminRestricted
+    public ResponseEntity<?> spendFame(final HttpServletRequest request, @PathVariable final String accountUuid,
+            @RequestParam("amount") final long amount) {
         ResponseEntity<?> res = null;
         try {
-            this.playerDataService.deleteCharacter(request, characterUuid);
+            final Long newTotal = this.playerDataService.spendAccountFame(accountUuid, amount);
+            res = ApiUtils.buildSuccess(newTotal);
+        } catch (Exception e) {
+            res = ApiUtils.buildAndLogError("Failed to spend fame", e.getMessage());
+        }
+        return res;
+    }
+
+    @DeleteMapping(value = "/account/character/{characterUuid}", produces = { "application/json" })
+    public ResponseEntity<?> deleteCharacter(final HttpServletRequest request, @PathVariable String characterUuid,
+            @RequestParam(name = "bankFame", required = false, defaultValue = "false") boolean bankFame) {
+        ResponseEntity<?> res = null;
+        try {
+            this.playerDataService.deleteCharacter(request, characterUuid, bankFame);
 
             res = ApiUtils.buildSuccess(ErrorResponseObject.builder().message("successfully deleted character " + characterUuid)
                     .reason("Character deleted").status(HttpStatus.OK).build());

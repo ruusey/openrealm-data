@@ -34,6 +34,9 @@ public class CharacterStatsEntity extends TemporalEntity {
 	private Integer dex;
 	private Integer vit;
 	private Integer wis;
+	// Opaque cosmetic dye id keyed in the client's dye-assets.json. See
+	// CharacterStatsDto for the rationale. 0 / null = no dye.
+	private Integer dyeId;
 
 	public static CharacterStatsEntity characterDefaults(final Integer characterClass) {
 		final CharacterClassModel model = GameDataManager.CHARACTER_CLASSES.get(characterClass);

@@ -25,6 +25,11 @@ public class PlayerAccountEntity {
 	private String accountUuid;
 	private String accountName;
 
+	// Banked fame from dead characters. Existing documents lacking this field
+	// deserialize as null; PlayerDataService.bankCharacterFame normalizes that
+	// to 0 before incrementing.
+	private Long accountFame;
+
 	@Builder.Default
 	private List<ChestEntity> playerVault = new ArrayList<>();
 

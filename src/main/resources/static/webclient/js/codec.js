@@ -236,7 +236,8 @@ export const NetPlayer = {
             id: r.readLong(), name: r.readString(), accountUuid: r.readString(),
             characterUuid: r.readString(), classId: r.readInt(), size: r.readShort(),
             pos: Vector2f.read(r), dX: r.readFloat(), dY: r.readFloat(),
-            shortId: r.readShort(), chatRole: r.readString()
+            shortId: r.readShort(), chatRole: r.readString(),
+            dyeId: r.readInt()
         };
     }
 };

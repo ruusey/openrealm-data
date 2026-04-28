@@ -225,14 +225,14 @@ button.small { padding: 8px 14px; font-size: 13px; width: auto; margin: 0; }
    ground-loot panel etc. */
 #difficulty-icon {
     position: fixed;
-    /* Desktop default: left of the minimap.
-       HUD is 300px wide on the right (#hud { right: 10px; width: 300px }) so
-       the HUD's left edge sits at right:10 + 300 = 310 from the right.
-       Anchor the icon's RIGHT edge at right:322 so there's a 12px gap between
-       the icon and the HUD — enough to clear the player-identity text padding
-       on the HUD's first row. */
+    /* Desktop default: sits to the LEFT of the account-fame badge, which sits
+       to the left of the HUD/minimap. HUD is 300px wide on the right
+       (#hud { right: 10px; width: 300px }) so the HUD's left edge is at
+       right:310. Account fame badge takes 132px starting at right:322 so its
+       left edge is at right:454. Anchor the difficulty icon's right edge at
+       right:466 (454 + 12px gap) for visual breathing room. */
     top: 14px;
-    right: 322px;
+    right: 466px;
     width: 46px;
     height: 46px;
     border: 2px solid #a04040;
@@ -258,6 +258,48 @@ button.small { padding: 8px 14px; font-size: 13px; width: auto; margin: 0; }
     font-size: 10px;
     font-weight: bold;
     margin-top: 1px;
+}
+
+/* Account fame badge — lifetime fame banked from dead characters. Sits to
+   the right of the difficulty icon and to the left of the HUD/minimap, so
+   the visual order top-to-bottom-of-screen is: [☠ diff] [✦ fame] [HUD]. */
+#account-fame-display {
+    position: fixed;
+    top: 14px;
+    right: 322px;          /* abuts the HUD's left edge (310) with 12px gap */
+    height: 46px;
+    min-width: 132px;
+    padding: 0 14px;
+    border: 2px solid #c8a86e;
+    border-radius: 6px;
+    background: rgba(50, 38, 24, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    z-index: 21;
+    pointer-events: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    font-family: 'OryxSimplex', monospace;
+    color: #ffd86b;
+    text-shadow: 1px 1px 2px #000;
+    line-height: 1;
+}
+#account-fame-display .afd-icon {
+    font-size: 20px;
+    color: #ffd86b;
+}
+#account-fame-display .afd-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffefb0;
+    letter-spacing: 0.5px;
+}
+#account-fame-display .afd-label {
+    font-size: 11px;
+    color: #c8a86e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 #hud-bars { margin-bottom: 8px; }
 .bar-container {
@@ -1008,7 +1050,8 @@ body.forge-open #ground-loot-panel { z-index: 200; }
         z-index: 20;
         margin: 0 !important;
     }
-    /* Difficulty icon: compact pill next to minimap */
+    /* Difficulty icon: compact pill, sits between minimap (top-left) and the
+       account fame badge — same left-to-right ordering as desktop. */
     #difficulty-icon {
         top: 3px !important;
         left: 94px !important;
@@ -1020,6 +1063,21 @@ body.forge-open #ground-loot-panel { z-index: 200; }
     }
     #difficulty-skull { font-size: 14px !important; }
     #difficulty-value { font-size: 7px !important; margin-top: 0 !important; }
+    /* Account fame badge: compact pill to the right of the difficulty icon. */
+    #account-fame-display {
+        top: 3px !important;
+        left: 128px !important;
+        right: auto !important;
+        height: 28px !important;
+        min-width: 0 !important;
+        padding: 0 8px !important;
+        border-radius: 4px !important;
+        border-width: 1px !important;
+        gap: 4px !important;
+    }
+    #account-fame-display .afd-icon { font-size: 12px !important; }
+    #account-fame-display .afd-value { font-size: 11px !important; letter-spacing: 0 !important; }
+    #account-fame-display .afd-label { font-size: 8px !important; letter-spacing: 0.5px !important; }
     #perf-overlay { display: none !important; }
     #touch-joystick { bottom: 140px; left: 10px; }
     #touch-aim { right: calc(clamp(100px, 16vw, 140px) + 14px); }

@@ -31,6 +31,7 @@
       <button class="tab" data-tab="projgroups">Projectiles</button>
       <button class="tab" data-tab="lootgroups">Loot</button>
       <button class="tab" data-tab="animations">Animations</button>
+      <button class="tab" data-tab="classmasks">Class Dyes</button>
       <button class="tab" data-tab="portals">Portals</button>
       <button class="tab" data-tab="setpieces">SetPieces</button>
       <button class="tab" data-tab="realmevents">Events</button>
@@ -545,6 +546,78 @@
 
       <div class="detail-actions" style="margin-top:8px">
         <button id="applyAnimBtn" class="btn-apply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Class Dye Masks Tab — paint per-pixel masks marking which pixels of a
+       class's canonical idle_front sprite belong to "accessory" (e.g. wizard
+       cap) vs "clothing" (e.g. wizard robe). Renderer uses these masks to
+       apply player-chosen dye colors as HSL shifts on top of the base sprite. -->
+  <div class="panel tile-panel" id="classmasksTab" style="display:none">
+    <div class="tile-header">
+      <h2>Class Dye Masks (<span id="cmCount">0</span>)</h2>
+      <input type="text" id="cmSearch" placeholder="Search classes...">
+    </div>
+    <div class="tile-list" id="cmListView"></div>
+
+    <div class="item-detail" id="cmDetail" style="display:none">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <button id="cmBackBtn" class="btn-pick" style="padding:3px 8px">&larr; Back</button>
+        <h3 id="cmDetailTitle" style="margin:0">Class Mask</h3>
+      </div>
+      <div class="detail-grid">
+        <label>Class ID: <input type="number" id="cmClassId" readonly></label>
+        <label>Sprite Sheet: <input type="text" id="cmSpriteKey" readonly></label>
+        <label>Editing: <span id="cmFrameLabel" style="color:#c8a86e;font-weight:bold">(no frame)</span></label>
+        <label>Row/Col: <span id="cmRowColLabel">-</span></label>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap">
+        <span style="font-size:12px;color:#888">Brush:</span>
+        <button class="cm-brush" data-brush="0" style="padding:4px 10px;font-size:11px">None (erase)</button>
+        <button class="cm-brush active" data-brush="1" style="padding:4px 10px;font-size:11px;background:#8a4a3a;color:#fff;border:1px solid #c87060">Accessory</button>
+        <button class="cm-brush" data-brush="2" style="padding:4px 10px;font-size:11px">Clothing</button>
+        <button id="cmAutoSeedBtn" class="btn-pick" style="padding:4px 10px;font-size:11px" title="Find the darkest row (eyes) on this frame and split: above=accessory, below=clothing">Auto-seed (this frame)</button>
+        <button id="cmAutoSeedAllBtn" class="btn-pick" style="padding:4px 10px;font-size:11px;background:#384d2e;border-color:#5a7a48" title="Run eye-row auto-seed on every frame in this class">Auto-seed (all frames)</button>
+        <label style="font-size:11px;color:#888;display:flex;align-items:center;gap:4px;margin-left:auto">
+          Copy from:
+          <select id="cmCopyFromSelect" style="font-size:11px;background:#1a1820;color:#e0d8c8;border:1px solid #3a2a38;padding:2px 4px;max-width:160px"></select>
+          <button id="cmCopyFromBtn" class="btn-pick" style="padding:3px 8px;font-size:11px">Copy</button>
+        </label>
+        <button id="cmClearBtn" class="btn-delete" style="padding:4px 10px;font-size:11px">Clear (this frame)</button>
+      </div>
+
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <!-- Frame strip: scrollable list of all frames with mask status. -->
+        <div style="flex:0 0 200px">
+          <div style="font-size:11px;color:#888;margin-bottom:4px">Frames (click to edit)</div>
+          <div id="cmFrameList" style="max-height:520px;overflow-y:auto;border:1px solid #444;background:#0f0d12;padding:4px;border-radius:3px"></div>
+        </div>
+        <!-- Paint canvas. -->
+        <div>
+          <div style="font-size:11px;color:#888;margin-bottom:4px">Sprite + Mask Overlay</div>
+          <div style="position:relative;border:1px solid #444;background:#0a080c">
+            <canvas id="cmSpriteCanvas" width="256" height="256" style="display:block;image-rendering:pixelated"></canvas>
+            <canvas id="cmMaskCanvas" width="256" height="256" style="position:absolute;top:0;left:0;cursor:crosshair;pointer-events:auto"></canvas>
+          </div>
+          <div style="font-size:10px;color:#666;margin-top:4px">Click or drag to paint. Right-click erases.</div>
+        </div>
+        <!-- Preview + counts. -->
+        <div>
+          <div style="font-size:11px;color:#888;margin-bottom:4px">Preview (clothing → blue, accessory → red)</div>
+          <canvas id="cmPreviewCanvas" width="128" height="128" style="display:block;image-rendering:pixelated;border:1px solid #444;background:#0a080c"></canvas>
+          <div style="margin-top:8px;font-size:11px;color:#888">
+            <div>Accessory pixels: <span id="cmAccCount" style="color:#fa8;font-weight:bold">0</span></div>
+            <div>Clothing pixels: <span id="cmClothCount" style="color:#8af;font-weight:bold">0</span></div>
+            <div style="margin-top:6px">Class total:</div>
+            <div>Frames painted: <span id="cmPaintedFrames" style="color:#c8a86e;font-weight:bold">0</span> / <span id="cmTotalFrames">0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-actions" style="margin-top:8px">
+        <button id="applyCmBtn" class="btn-apply">Apply</button>
       </div>
     </div>
   </div>
