@@ -5871,5 +5871,23 @@
 		"category": "essence",
 		"forgeStatId": -1,
 		"forgeSlotId": 3
+	},
+	{
+		"itemId": 820,
+		"row": 19,
+		"col": 12,
+		"spriteKey": "lofiObj2.png",
+		"name": "Universal Essence",
+		"description": "A condensed essence that substitutes for 50 of any essence type in the forge. Consumed entirely on use.",
+		"consumable": false,
+		"tier": -1,
+		"targetSlot": -1,
+		"targetClass": -1,
+		"fameBonus": 0,
+		"stackable": false,
+		"maxStack": 1,
+		"category": "essence",
+		"forgeStatId": -1,
+		"forgeSlotId": -1
 	}
 ]
