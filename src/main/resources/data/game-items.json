@@ -5892,7 +5892,7 @@
 	},
 	{
 		"itemId": 821,
-		"row": 2,
+		"row": 1,
 		"col": 0,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Green Dye",
@@ -5908,7 +5908,7 @@
 	},
 	{
 		"itemId": 822,
-		"row": 2,
+		"row": 1,
 		"col": 1,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Yellow Dye",
@@ -5924,7 +5924,7 @@
 	},
 	{
 		"itemId": 823,
-		"row": 2,
+		"row": 1,
 		"col": 2,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Red Dye",
@@ -5940,7 +5940,7 @@
 	},
 	{
 		"itemId": 824,
-		"row": 2,
+		"row": 1,
 		"col": 3,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Blue Dye",
@@ -5956,7 +5956,7 @@
 	},
 	{
 		"itemId": 825,
-		"row": 2,
+		"row": 1,
 		"col": 4,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Purple Dye",
@@ -5972,7 +5972,7 @@
 	},
 	{
 		"itemId": 826,
-		"row": 2,
+		"row": 1,
 		"col": 5,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Orange Dye",
@@ -5988,7 +5988,7 @@
 	},
 	{
 		"itemId": 827,
-		"row": 2,
+		"row": 1,
 		"col": 6,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "White Dye",
@@ -6004,7 +6004,7 @@
 	},
 	{
 		"itemId": 828,
-		"row": 2,
+		"row": 1,
 		"col": 7,
 		"spriteKey": "rotmg-tiles-all.png",
 		"name": "Black Dye",
