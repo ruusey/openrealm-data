@@ -18,6 +18,10 @@ const SLOT_LABEL = ['Weapon','Ability','Armor','Ring'];
 
 const MAX_ENCHANTMENTS = 5;
 const ESSENCE_PER_FORGE = 50;
+// Universal essence: one non-stackable item subs for 50 of any typed essence.
+// Server enforces; client mirrors so the cost preview is accurate.
+const UNIVERSAL_ESSENCE_ITEM_ID = 820;
+const isUniversalEssence = (it) => it && it.itemId === UNIVERSAL_ESSENCE_ITEM_ID;
 
 let _game = null;
 let _network = null;
@@ -189,12 +193,12 @@ function refreshUi() {
     }
     if (!crystal) { canForge = false; issues.push('Pick a Crystal.'); }
     if (!essence) { canForge = false; issues.push('Pick Essence.'); }
-    if (target && essence && essence.forgeSlotId !== target.targetSlot) {
+    if (target && essence && !isUniversalEssence(essence) && essence.forgeSlotId !== target.targetSlot) {
         canForge = false;
         const need = SLOT_LABEL[target.targetSlot] || '?';
         issues.push(`Essence type must be ${need}.`);
     }
-    if (essence && (essence.stackCount || 0) < ESSENCE_PER_FORGE) {
+    if (essence && !isUniversalEssence(essence) && (essence.stackCount || 0) < ESSENCE_PER_FORGE) {
         canForge = false; issues.push(`Need ${ESSENCE_PER_FORGE} essence (have ${essence.stackCount || 0}).`);
     }
     if (_state.pixelX < 0) {
@@ -213,7 +217,10 @@ function refreshUi() {
         if (target && crystal && essence) {
             const ok = canForge ? 'ok' : 'bad';
             const stat = STAT_LABEL[crystal.forgeStatId] || '?';
-            cost.innerHTML = `Cost: 1 <span class="${ok}">${stat} Crystal</span> + ${ESSENCE_PER_FORGE} <span class="${ok}">${SLOT_LABEL[essence.forgeSlotId] || '?'} Essence</span> &rarr; +1 ${stat}`;
+            const essenceText = isUniversalEssence(essence)
+                ? `1 <span class="${ok}">Universal Essence</span>`
+                : `${ESSENCE_PER_FORGE} <span class="${ok}">${SLOT_LABEL[essence.forgeSlotId] || '?'} Essence</span>`;
+            cost.innerHTML = `Cost: 1 <span class="${ok}">${stat} Crystal</span> + ${essenceText} &rarr; +1 ${stat}`;
         } else {
             cost.textContent = '';
         }
