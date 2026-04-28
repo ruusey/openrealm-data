@@ -220,86 +220,74 @@ button.small { padding: 8px 14px; font-size: 13px; width: auto; margin: 0; }
 }
 #minimap-canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
 
-/* Difficulty icon — square skull+crossbones positioned adjacent to the minimap.
-   Lives OUTSIDE the HUD flex column so it never steals vertical space from the
-   ground-loot panel etc. */
+/* Difficulty + account-fame badges row. Lives INSIDE the HUD column above
+   the minimap — they share HUD width so the minimap gets the full HUD
+   horizontal space and there's no crowding. Mobile overrides below lift
+   them back out as compact pills next to the relocated minimap. */
+#hud-badges {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+/* Difficulty icon — compact pill, only shown when difficulty > 0 */
 #difficulty-icon {
-    position: fixed;
-    /* Desktop default: sits to the LEFT of the account-fame badge, which sits
-       to the left of the HUD/minimap. HUD is 300px wide on the right
-       (#hud { right: 10px; width: 300px }) so the HUD's left edge is at
-       right:310. Account fame badge takes 132px starting at right:322 so its
-       left edge is at right:454. Anchor the difficulty icon's right edge at
-       right:466 (454 + 12px gap) for visual breathing room. */
-    top: 14px;
-    right: 466px;
-    width: 46px;
-    height: 46px;
-    border: 2px solid #a04040;
-    border-radius: 6px;
+    flex: 0 0 auto;
+    height: 32px;
+    min-width: 56px;
+    padding: 0 8px;
+    border: 1px solid #a04040;
+    border-radius: 4px;
     background: rgba(180, 60, 60, 0.9);
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 21;
+    gap: 4px;
     pointer-events: none;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     font-family: monospace;
     color: #fff;
     text-shadow: 1px 1px 2px #000;
     line-height: 1;
 }
-#difficulty-skull {
-    font-size: 24px;
-    line-height: 1;
-}
-#difficulty-value {
-    font-size: 10px;
-    font-weight: bold;
-    margin-top: 1px;
-}
+#difficulty-skull { font-size: 16px; line-height: 1; }
+#difficulty-value { font-size: 11px; font-weight: bold; }
 
-/* Account fame badge — lifetime fame banked from dead characters. Sits to
-   the right of the difficulty icon and to the left of the HUD/minimap, so
-   the visual order top-to-bottom-of-screen is: [☠ diff] [✦ fame] [HUD]. */
+/* Account fame badge — lifetime fame banked from dead characters. Flex-1
+   so it takes the remaining HUD-row width next to the difficulty pill. */
 #account-fame-display {
-    position: fixed;
-    top: 14px;
-    right: 322px;          /* abuts the HUD's left edge (310) with 12px gap */
-    height: 46px;
-    min-width: 132px;
-    padding: 0 14px;
-    border: 2px solid #c8a86e;
-    border-radius: 6px;
+    flex: 1 1 auto;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid #c8a86e;
+    border-radius: 4px;
     background: rgba(50, 38, 24, 0.92);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    z-index: 21;
     pointer-events: none;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     font-family: 'OryxSimplex', monospace;
     color: #ffd86b;
     text-shadow: 1px 1px 2px #000;
     line-height: 1;
 }
 #account-fame-display .afd-icon {
-    font-size: 20px;
+    font-size: 14px;
     color: #ffd86b;
 }
 #account-fame-display .afd-value {
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 700;
     color: #ffefb0;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
 }
 #account-fame-display .afd-label {
-    font-size: 11px;
+    font-size: 9px;
     color: #c8a86e;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.8px;
 }
 #hud-bars { margin-bottom: 8px; }
 .bar-container {
@@ -1115,21 +1103,32 @@ body.forge-open #ground-loot-panel { z-index: 200; }
         z-index: 20;
         margin: 0 !important;
     }
+    /* On mobile the minimap is repositioned to top-left, so lift the badges
+       out of the HUD column (where they live on desktop) into fixed-position
+       pills sitting next to the relocated minimap. */
+    #hud-badges { display: contents !important; }
     /* Difficulty icon: compact pill, sits between minimap (top-left) and the
        account fame badge — same left-to-right ordering as desktop. */
     #difficulty-icon {
+        position: fixed !important;
         top: 3px !important;
         left: 94px !important;
         right: auto !important;
         width: 28px !important;
         height: 28px !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+        flex-direction: column !important;
+        gap: 0 !important;
         border-radius: 4px !important;
         border-width: 1px !important;
+        z-index: 20;
     }
     #difficulty-skull { font-size: 14px !important; }
     #difficulty-value { font-size: 7px !important; margin-top: 0 !important; }
     /* Account fame badge: compact pill to the right of the difficulty icon. */
     #account-fame-display {
+        position: fixed !important;
         top: 3px !important;
         left: 128px !important;
         right: auto !important;
@@ -1139,6 +1138,7 @@ body.forge-open #ground-loot-panel { z-index: 200; }
         border-radius: 4px !important;
         border-width: 1px !important;
         gap: 4px !important;
+        z-index: 20;
     }
     #account-fame-display .afd-icon { font-size: 12px !important; }
     #account-fame-display .afd-value { font-size: 11px !important; letter-spacing: 0 !important; }

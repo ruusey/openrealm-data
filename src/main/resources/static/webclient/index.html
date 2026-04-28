@@ -144,24 +144,24 @@
     <!-- Game Screen -->
     <div id="game-screen" class="screen">
         <div id="game-canvas-container"></div>
-        <!-- Difficulty icon — square skull+crossbones, positioned next to the minimap
-             (left of it on desktop, right of it on mobile). Deliberately NOT inside
-             #hud so it can't push the ground-loot-panel off-screen on small viewports. -->
-        <div id="difficulty-icon" style="display:none">
-            <span id="difficulty-skull">☠</span>
-            <span id="difficulty-value">1.0</span>
-        </div>
-        <!-- Account fame badge — lifetime fame banked from dead characters.
-             Sits between #difficulty-icon and the minimap. Hidden until we know
-             the value (set by updateHUD when account is loaded). -->
-        <div id="account-fame-display" style="display:none">
-            <span class="afd-icon">✦</span>
-            <span class="afd-value" id="account-fame-value">0</span>
-            <span class="afd-label">Fame</span>
-        </div>
         <!-- HUD Overlay -->
         <div id="hud">
             <div id="player-identity" style="padding:6px 8px;font-family:monospace;font-weight:bold;font-size:14px;color:#c8a86e;border-bottom:1px solid #333;margin-bottom:4px;text-shadow:1px 1px 2px #000;"></div>
+            <!-- Difficulty + account fame badges. Live INSIDE the HUD column
+                 so they don't crowd the minimap horizontally — they get their
+                 own row above it. Mobile CSS lifts them out into the top-left
+                 strip next to the relocated minimap. -->
+            <div id="hud-badges">
+                <div id="difficulty-icon" style="display:none">
+                    <span id="difficulty-skull">☠</span>
+                    <span id="difficulty-value">1.0</span>
+                </div>
+                <div id="account-fame-display" style="display:none">
+                    <span class="afd-icon">✦</span>
+                    <span class="afd-value" id="account-fame-value">0</span>
+                    <span class="afd-label">Fame</span>
+                </div>
+            </div>
             <div id="minimap-container"><canvas id="minimap-canvas"></canvas></div>
             <div id="hud-bars">
                 <div class="bar-container">

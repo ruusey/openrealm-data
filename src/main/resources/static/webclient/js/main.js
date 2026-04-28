@@ -435,10 +435,12 @@ function showCharacterSelect() {
             card.className = 'char-card';
             const className = ALL_CLASSES[char.characterClass] || `Class ${char.characterClass}`;
             const stats = char.stats || {};
+            // Show level + fame; pre-max characters always sit at "Fame 0",
+            // raw XP isn't useful info on the char-select screen.
             const lf = computeLevelFame(stats.xp);
             const xpFameLabel = lf.isFame
                 ? `Lv 20 · Fame ${lf.fame.toLocaleString()}`
-                : `Lv ${lf.level} · XP ${(Number(stats.xp) || 0).toLocaleString()}`;
+                : `Lv ${lf.level} · Fame 0`;
             const iconDiv = document.createElement('div');
             iconDiv.className = 'char-icon';
             const classId = char.characterClass || 0;
@@ -625,9 +627,10 @@ async function loadLeaderboard() {
 
             const fame = document.createElement('span');
             fame.className = 'lb-fame';
+            // Pre-max characters always show "Fame 0"; raw XP is too noisy.
             fame.textContent = isFameMode
                 ? `Fame: ${entry.fame.toLocaleString()}`
-                : `XP: ${(entry.stats && entry.stats.xp != null ? entry.stats.xp : 0).toLocaleString()}`;
+                : `Fame: 0`;
 
             row.append(rank, icon, info, fame);
 
@@ -656,16 +659,15 @@ function showEquipmentTooltip(event, entry) {
     }
     const slotNames = ['Weapon', 'Ability', 'Armor', 'Ring'];
     let html = `<div class="lb-tooltip-title">${entry.accountName}'s ${entry.className}</div>`;
-    // Optional second header line: Lv + XP/Fame. Used by the character-select
-    // card hover tooltip; leaderboard rows already show this info inline.
+    // Second header line: Lv + Fame. Used by the character-select card hover
+    // tooltip; leaderboard rows already show this info inline. Pre-max chars
+    // show "Fame 0" — raw XP isn't useful here.
     const isFame = (entry.fame || 0) > 0;
-    const xpVal = entry.stats && entry.stats.xp != null ? Number(entry.stats.xp) : null;
-    if (entry.level != null || isFame || xpVal != null) {
+    if (entry.level != null || isFame) {
         const lvlPart = isFame ? 'Lv 20' : (entry.level != null ? `Lv ${entry.level}` : '');
-        const progPart = isFame
-            ? `Fame ${(entry.fame || 0).toLocaleString()}`
-            : (xpVal != null ? `XP ${xpVal.toLocaleString()}` : '');
-        const sep = lvlPart && progPart ? ' · ' : '';
+        const fameAmount = isFame ? (entry.fame || 0) : 0;
+        const progPart = `Fame ${fameAmount.toLocaleString()}`;
+        const sep = lvlPart ? ' · ' : '';
         html += `<div class="lb-tooltip-sub">${lvlPart}${sep}${progPart}</div>`;
     }
     html += '<div class="lb-tooltip-equip">';
