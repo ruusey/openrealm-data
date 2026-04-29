@@ -81,6 +81,9 @@ export class GameRenderer {
 
         // Tile layer cache key — invalidated when visible tile range changes
         this._tileCacheKey = null;
+        // Last position where tile layer was built; rebuild only when player
+        // has moved past REBUILD_THRESHOLD tiles from this center.
+        this._tileBuildCenter = null;
 
         // Billboard sprite references — updated each frame with counter-rotation
         this._billboardSprites = [];
@@ -136,6 +139,7 @@ export class GameRenderer {
     /** Force tile layer rebuild on next frame (call on realm transition). */
     invalidateTileCache() {
         this._tileCacheKey = null;
+        this._tileBuildCenter = null;
         this._billboardSprites = [];
         // On realm transitions, drop all pooled entities — different entities
         // exist in the new realm and stale containers would linger invisibly.
@@ -683,16 +687,27 @@ export class GameRenderer {
         const rotExpand = angle !== 0 ? Math.ceil(VIEWPORT_TILES * 0.42) : 0;
         const range = VIEWPORT_TILES + rotExpand;
 
-        const minR = Math.max(0, playerTileY - range);
-        const maxR = Math.min(gameState.mapHeight - 1, playerTileY + range);
-        const minC = Math.max(0, playerTileX - range);
-        const maxC = Math.min(gameState.mapWidth - 1, playerTileX + range);
+        // Build a region LARGER than the visible viewport, then only rebuild
+        // when the player has moved past the rebuild threshold from the last
+        // build center. Without this padding, every tile-boundary crossing
+        // (~1/sec at running speed) destroyed and re-allocated ~2000 PIXI
+        // objects, causing visible stalls and entity-render choppiness.
+        const REBUILD_THRESHOLD = 8; // tiles of movement before rebuild
+        const BUILD_PADDING = REBUILD_THRESHOLD + 2; // extra cached tiles
+        const center = this._tileBuildCenter;
+        const needsRebuild = !center
+            || Math.abs(playerTileX - center.x) > REBUILD_THRESHOLD
+            || Math.abs(playerTileY - center.y) > REBUILD_THRESHOLD
+            || center.range !== range;
 
-        // Cache key: only rebuild tiles when the visible tile range changes.
-        // Billboard rotation is updated separately without rebuilding.
-        const cacheKey = `${minR},${maxR},${minC},${maxC},${gameState.mapWidth}`;
-        if (this._tileCacheKey !== cacheKey) {
-            this._tileCacheKey = cacheKey;
+        if (needsRebuild) {
+            this._tileBuildCenter = { x: playerTileX, y: playerTileY, range };
+            const buildRange = range + BUILD_PADDING;
+            const minR = Math.max(0, playerTileY - buildRange);
+            const maxR = Math.min(gameState.mapHeight - 1, playerTileY + buildRange);
+            const minC = Math.max(0, playerTileX - buildRange);
+            const maxC = Math.min(gameState.mapWidth - 1, playerTileX + buildRange);
+            this._tileCacheKey = `${minR},${maxR},${minC},${maxC},${gameState.mapWidth}`;
             this._rebuildTileLayer(gameState, minR, maxR, minC, maxC, ts);
         }
 
@@ -913,19 +928,27 @@ export class GameRenderer {
         }
         buf.sort(GameRenderer.SORT_BY_Y);
 
-        // Render each entity into its pooled container. Each renderXxx mutates
-        // the existing children rather than allocating new ones.
+        // Render each entity into its pooled container. The pool key is built
+        // from the Map iteration key (ent.id), not from data.id — they only
+        // sometimes match (lootContainers is keyed by lootContainerId, not
+        // by an `id` property). The pool entry is acquired here so the same
+        // key is guaranteed during re-add below.
         for (const ent of buf) {
-            if (ent.type === 0) this.renderLootContainer(ent.data, angle, gameState);
-            else if (ent.type === 1) this.renderPortal(ent.data, angle, gameState);
-            else if (ent.type === 2) this.renderEnemy(ent.data, angle, gameState);
-            else if (ent.type === 3) this.renderPlayer(ent.data, angle, ent.id === gameState.playerId, gameState);
+            const hasOutlines = ent.type === 2 || ent.type === 3;
+            const key = ent.type === 0 ? 'l:' + ent.id
+                      : ent.type === 1 ? 'po:' + ent.id
+                      : ent.type === 2 ? 'e:' + ent.id
+                      : 'p:' + ent.id;
+            const e = this._acquireEntity(key, hasOutlines);
+            if (ent.type === 0) this.renderLootContainer(ent.data, angle, gameState, e);
+            else if (ent.type === 1) this.renderPortal(ent.data, angle, gameState, e);
+            else if (ent.type === 2) this.renderEnemy(ent.data, angle, gameState, e);
+            else if (ent.type === 3) this.renderPlayer(ent.data, angle, ent.id === gameState.playerId, gameState, e);
         }
 
         // Re-order entityLayer children in y-sorted order. removeChildren
         // unparents but does NOT destroy — cheap. We then re-add visible
         // pooled containers in sorted order, followed by bullet pool sprites.
-        // Entries not seen this frame stay unparented (effectively hidden).
         this.entityLayer.removeChildren();
         for (const ent of buf) {
             const key = ent.type === 0 ? 'l:' + ent.id
@@ -1014,7 +1037,7 @@ export class GameRenderer {
         this._reapEntityPool(false);
     }
 
-    renderPlayer(player, angle, isLocal, gameState) {
+    renderPlayer(player, angle, isLocal, gameState, e) {
         const collisionSize = (player.size || PLAYER_SIZE) * SCALE;
         const size = PLAYER_RENDER_SIZE * SCALE;
         const renderOffset = (size - collisionSize) / 2;
@@ -1079,8 +1102,8 @@ export class GameRenderer {
         const wadingClip = wading ? 0.30 : 0;
         const visibleHeight = size * (1 - wadingClip);
 
-        // Acquire pooled entity entry. Children persist across frames.
-        const e = this._acquireEntity('p:' + player.id, true);
+        // Pool entry passed in by renderEntities (acquired with the correct
+        // Map key). Children persist across frames.
         const bb = e.bb;
         bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
@@ -1108,14 +1131,17 @@ export class GameRenderer {
             if (e.cachedTex !== tex) { spr.texture = tex; e.cachedTex = tex; }
             spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
-            // Anchor only changes on flip transitions; scale sign must be
-            // applied every frame because spr.width=... resets scale.x positive.
+            // PIXI's width setter PRESERVES the sign of scale.x. So once we
+            // mirror the sprite (negative scale.x for flipX), `width = size`
+            // does NOT restore positive scale on the next frame — we must
+            // do it explicitly. Without this we get a phantom mirrored sprite
+            // on the wrong side after the player turns around.
             if (e.cachedFlipX !== flipX) {
                 if (flipX) spr.anchor.set(1, 0);
                 else       spr.anchor.set(0, 0);
                 e.cachedFlipX = flipX;
             }
-            if (flipX) spr.scale.x = -Math.abs(spr.scale.x);
+            spr.scale.x = flipX ? -Math.abs(spr.scale.x) : Math.abs(spr.scale.x);
 
             // Status-effect tint, only assigned when changed (preserves PIXI batching).
             const effects = isLocal ? gameState.effectIds : (player.effectIds || []);
@@ -1160,20 +1186,20 @@ export class GameRenderer {
             }
 
             // Update outline sprites (4 cardinal-offset tinted copies).
+            // Mirror via anchor + negative scale.x like the original
+            // addSpriteWithOutline; the position stays at lx + ox in both
+            // orientations (the anchor change is what reflects the sprite).
+            // scale.x sign must be applied every frame — see body comment.
             for (let i = 0; i < 4; i++) {
                 const ox = OUTLINE_OFFSETS[i][0], oy = OUTLINE_OFFSETS[i][1];
                 const ol = e.outlines[i];
                 if (ol.texture !== tex) ol.texture = tex;
-                ol.width = size; ol.height = size; // resets scale to positive
+                ol.width = size; ol.height = size;
+                ol.x = lx + ox;
                 ol.y = (wading ? spr.y : ly) + oy;
-                if (flipX) {
-                    ol.anchor.set(1, 0);
-                    ol.scale.x = -Math.abs(ol.scale.x);
-                    ol.x = lx + size + ox;
-                } else {
-                    ol.anchor.set(0, 0);
-                    ol.x = lx + ox;
-                }
+                if (flipX) ol.anchor.set(1, 0);
+                else       ol.anchor.set(0, 0);
+                ol.scale.x = flipX ? -Math.abs(ol.scale.x) : Math.abs(ol.scale.x);
                 ol.mask = wading ? e.mask : null;
                 ol.visible = true;
             }
@@ -1244,12 +1270,11 @@ export class GameRenderer {
         // bb is already parented; renderEntities re-orders the entityLayer.
     }
 
-    renderEnemy(enemy, angle, gameState) {
+    renderEnemy(enemy, angle, gameState, e) {
         const sx = enemy.pos.x * SCALE;
         const sy = enemy.pos.y * SCALE;
         const size = (enemy.size || PLAYER_SIZE) * SCALE;
 
-        const e = this._acquireEntity('e:' + enemy.id, true);
         const bb = e.bb;
         bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
@@ -1334,7 +1359,7 @@ export class GameRenderer {
 
     // renderBullet removed — bullets are now batched inline in renderEntities()
 
-    renderLootContainer(loot, angle, gameState) {
+    renderLootContainer(loot, angle, gameState, e) {
         const sx = loot.pos.x * SCALE;
         const sy = loot.pos.y * SCALE;
         const fullSize = this.tileSize * SCALE;
@@ -1347,7 +1372,6 @@ export class GameRenderer {
         const ox = renderFull ? 0 : fullSize / 4;
         const oy = renderFull ? 0 : fullSize / 4;
 
-        const e = this._acquireEntity('l:' + loot.id, false);
         const bb = e.bb;
         bb.position.set(Math.round(sx + ox + size / 2), Math.round(sy + oy + size / 2));
         bb.rotation = -angle;
@@ -1383,12 +1407,11 @@ export class GameRenderer {
         }
     }
 
-    renderPortal(portal, angle, gameState) {
+    renderPortal(portal, angle, gameState, e) {
         const sx = portal.pos.x * SCALE;
         const sy = portal.pos.y * SCALE;
         const size = this.tileSize * SCALE;
 
-        const e = this._acquireEntity('po:' + portal.id, false);
         const bb = e.bb;
         bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;

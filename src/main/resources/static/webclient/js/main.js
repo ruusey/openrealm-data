@@ -3140,17 +3140,33 @@ function endDrag(e) {
             // Drop to ground
             network.sendMoveItem(game.playerId, -1, dragSlot, true, false);
         } else {
-            // Equipment-slot validation: when dropping into slots 0-3, the
-            // dragged item MUST match the slot type AND be usable by the
-            // player's class. Mirrors the server check; lets us reject the
-            // drop locally so we don't waste a round-trip and the user gets
-            // immediate feedback (the drag returns to where it started).
+            // Equipment-slot validation. The server swaps the two slots
+            // when both contain items, so a swap into OR out of an equip
+            // slot must validate the item that ends up equipped.
+            //
+            // Case A — dragging INTO an equip slot (targetIdx 0-3): the
+            //   dragged item ends up equipped. Validate dragged item.
+            // Case B — dragging OUT OF an equip slot (dragSlot 0-3) onto
+            //   an inventory slot that already has an item: the inventory
+            //   item ends up equipped via swap. Validate that item against
+            //   dragSlot. If the destination slot is empty, no swap-in
+            //   happens, so no validation is needed.
             if (targetIdx >= 0 && targetIdx <= 3) {
                 const dragItem = game.inventory && game.inventory[dragSlot];
                 const def = dragItem && game.itemData ? game.itemData[dragItem.itemId] : null;
                 if (def && !canEquipInSlot(def, targetIdx, game.classId)) {
                     cleanupDrag();
                     return;
+                }
+            }
+            if (dragSlot >= 0 && dragSlot <= 3 && targetIdx >= 4) {
+                const tgtItem = game.inventory && game.inventory[targetIdx];
+                if (tgtItem && tgtItem.itemId >= 0) {
+                    const tgtDef = game.itemData ? game.itemData[tgtItem.itemId] : null;
+                    if (!tgtDef || !canEquipInSlot(tgtDef, dragSlot, game.classId)) {
+                        cleanupDrag();
+                        return;
+                    }
                 }
             }
             // Swap between inventory/equipment slots
