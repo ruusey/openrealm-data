@@ -1527,15 +1527,32 @@ function setupNetworkHandlers() {
     });
 
     network.on(PacketId.LOAD_MAP, (data) => {
+        // Detect realm/map change BEFORE handleLoadMap mutates game state.
+        // The server streams LoadMapPacket at ~4 Hz to deliver incremental
+        // tile data on the SAME map; we must not reap entities or rebuild
+        // the entire tile layer for those — that's what was making portals
+        // and enemies blink while the player walked around the nexus.
+        const realmChanged = game.realmId !== data.realmId || game.mapId !== data.mapId;
         console.log(`[GAME] LoadMap: realmId=${data.realmId}, mapId=${data.mapId}, ` +
-            `size=${data.mapWidth}x${data.mapHeight}, tiles=${data.tiles.length}`);
+            `size=${data.mapWidth}x${data.mapHeight}, tiles=${data.tiles.length}, ` +
+            `realmChanged=${realmChanged}`);
         game.handleLoadMap(data);
-        // Update tile size from map definitions
         if (renderer) {
             renderer.updateTileSize(data.mapId);
-            renderer.invalidateTileCache();
+            if (realmChanged) {
+                // True realm change: drop entity pool + force tile rebuild.
+                renderer.prepareForNewRealm();
+            } else if (data.tiles.length > 0) {
+                // Same-map LoadMap stream is delivering new tiles. We must
+                // rebuild the tile layer or the player will outrun the
+                // cached region and walk into "void". Entities are NOT
+                // touched here (the entity reap is gated to actual realm
+                // changes via prepareForNewRealm) — that's what fixed the
+                // 4 Hz portal/enemy blink without breaking tile streaming.
+                renderer.invalidateTileCache();
+            }
             game.tileSize = renderer.tileSize;
-            renderer._tileDebugLogged = false; // Re-log after map change
+            renderer._tileDebugLogged = false;
         }
         // Build minimap tile cache only on actual map change
         if (!minimap) {

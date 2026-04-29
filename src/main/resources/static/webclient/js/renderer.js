@@ -136,14 +136,24 @@ export class GameRenderer {
         this._fxGraphics = null;
     }
 
-    /** Force tile layer rebuild on next frame (call on realm transition). */
+    /** Force tile layer rebuild on next frame. Safe to call frequently —
+     *  it does NOT touch the entity pool. The server streams LoadMapPacket
+     *  at ~4 Hz to deliver incremental tile data on the same map; before
+     *  this was decoupled, every one of those packets nuked every pooled
+     *  entity (the cause of the per-second blinking the user reported). */
     invalidateTileCache() {
         this._tileCacheKey = null;
         this._tileBuildCenter = null;
         this._billboardSprites = [];
-        // On realm transitions, drop all pooled entities — different entities
-        // exist in the new realm and stale containers would linger invisibly.
+    }
+
+    /** Reset for an actual realm/map change: drop all pooled entities AND
+     *  invalidate the tile cache. Different entities exist in the new realm
+     *  and stale containers would linger as invisible (until the periodic
+     *  prune) which is wasteful for a large transition. */
+    prepareForNewRealm() {
         this._reapEntityPool(true);
+        this.invalidateTileCache();
     }
 
     /** Static y-sort comparator — hoisted to avoid per-frame closure alloc. */
@@ -1583,42 +1593,115 @@ export class GameRenderer {
                     break;
                 }
 
-                case 3: { // CHAIN_LIGHTNING — electric arc between two points
+                case 3: { // CHAIN_LIGHTNING — high-voltage forked arc
                     const _ts = this.worldToScreen(fx.targetX, fx.targetY, gameState);
                     const tx = _ts.x, ty = _ts.y;
                     const dx = tx - sx, dy = ty - sy;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    const segments = Math.max(4, Math.floor(dist / 10));
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const segments = Math.max(8, Math.floor(dist / 7));
                     const perpX = -dy / dist, perpY = dx / dist;
 
-                    // Outer glow — thick mystic blue
-                    g.lineStyle(6, 0x2040a0, alpha * 0.35);
-                    g.moveTo(sx, sy);
+                    // Strike-flash envelope — sharp early flash that fades fast,
+                    // then a slower decay for the trailing arc. Multiplies all
+                    // layers below so the bolt POPS at impact and lingers softly.
+                    const strike = progress < 0.18 ? 1.0 : Math.max(0, 1.0 - (progress - 0.18) / 0.82);
+                    // Erratic flicker — high-frequency noise to fake AC sizzle.
+                    const flicker = 0.7 + 0.3 * Math.sin(elapsed * 0.08 + sx * 0.13);
+
+                    // Build a jagged spine path used by every layer (so glow,
+                    // bolt, and core line up). Larger jitter near midpoint,
+                    // tapering to 0 at endpoints so the bolt actually connects.
+                    const path = new Array(segments + 1);
+                    path[0] = [sx, sy];
                     for (let i = 1; i < segments; i++) {
                         const t = i / segments;
-                        const jitter = (Math.random() - 0.5) * 20 * alpha;
-                        g.lineTo(sx + dx * t + perpX * jitter, sy + dy * t + perpY * jitter);
+                        const taper = Math.sin(t * Math.PI); // 0 at ends, 1 at middle
+                        const jitter = (Math.random() - 0.5) * 28 * taper;
+                        path[i] = [
+                            sx + dx * t + perpX * jitter,
+                            sy + dy * t + perpY * jitter
+                        ];
                     }
-                    g.lineTo(tx, ty);
-                    // Main bolt — medium mystic blue
-                    g.lineStyle(3, 0x4080e0, alpha * 0.85);
-                    g.moveTo(sx, sy);
-                    for (let i = 1; i < segments; i++) {
-                        const t = i / segments;
-                        const jitter = (Math.random() - 0.5) * 14 * alpha;
-                        g.lineTo(sx + dx * t + perpX * jitter, sy + dy * t + perpY * jitter);
-                    }
-                    g.lineTo(tx, ty);
-                    // Bright core — lighter blue
-                    g.lineStyle(1.5, 0x90c0ff, alpha * 0.7);
-                    g.moveTo(sx, sy);
-                    for (let i = 1; i < segments; i++) {
-                        const t = i / segments;
-                        const jitter = (Math.random() - 0.5) * 6 * alpha;
-                        g.lineTo(sx + dx * t + perpX * jitter, sy + dy * t + perpY * jitter);
-                    }
-                    g.lineTo(tx, ty);
+                    path[segments] = [tx, ty];
+
+                    const drawPath = (width, color, a) => {
+                        g.lineStyle(width, color, a);
+                        g.moveTo(path[0][0], path[0][1]);
+                        for (let i = 1; i <= segments; i++) g.lineTo(path[i][0], path[i][1]);
+                    };
+
+                    // Layer 1 — wide outer aura (purple-blue plasma haze)
+                    drawPath(14, 0x4020a0, alpha * 0.25 * strike);
+                    // Layer 2 — thick electric blue glow
+                    drawPath(9, 0x2060ff, alpha * 0.45 * strike * flicker);
+                    // Layer 3 — main bolt body (cyan-white)
+                    drawPath(5, 0x80c0ff, alpha * 0.85 * strike);
+                    // Layer 4 — hot inner core (pure white)
+                    drawPath(2, 0xffffff, Math.min(1, alpha * 1.2) * strike);
                     g.lineStyle(0);
+
+                    // Branching micro-bolts — short forks that split off at random
+                    // segments, perpendicular-ish to the main spine. Adds the
+                    // "crackling" feel without obscuring the main path.
+                    const forkCount = 5;
+                    for (let f = 0; f < forkCount; f++) {
+                        const segIdx = 1 + Math.floor(Math.random() * (segments - 1));
+                        const [bx, by] = path[segIdx];
+                        // Direction roughly perpendicular with random sign + tilt
+                        const sign = Math.random() < 0.5 ? -1 : 1;
+                        const tilt = (Math.random() - 0.5) * 0.6;
+                        const fdx = (perpX * sign + (dx / dist) * tilt) * (12 + Math.random() * 26);
+                        const fdy = (perpY * sign + (dy / dist) * tilt) * (12 + Math.random() * 26);
+                        // 3-step jagged sub-bolt
+                        const fp = [
+                            [bx, by],
+                            [bx + fdx * 0.5 + (Math.random() - 0.5) * 6, by + fdy * 0.5 + (Math.random() - 0.5) * 6],
+                            [bx + fdx, by + fdy]
+                        ];
+                        g.lineStyle(4, 0x2060ff, alpha * 0.4 * strike * flicker);
+                        g.moveTo(fp[0][0], fp[0][1]); g.lineTo(fp[1][0], fp[1][1]); g.lineTo(fp[2][0], fp[2][1]);
+                        g.lineStyle(2, 0xa0d0ff, alpha * 0.7 * strike);
+                        g.moveTo(fp[0][0], fp[0][1]); g.lineTo(fp[1][0], fp[1][1]); g.lineTo(fp[2][0], fp[2][1]);
+                        g.lineStyle(1, 0xffffff, alpha * 0.9 * strike);
+                        g.moveTo(fp[0][0], fp[0][1]); g.lineTo(fp[1][0], fp[1][1]); g.lineTo(fp[2][0], fp[2][1]);
+                        g.lineStyle(0);
+                    }
+
+                    // Impact burst at the target — radial spark + bright flash.
+                    if (progress < 0.55) {
+                        const burstA = (1.0 - progress / 0.55);
+                        // Big soft halo
+                        g.beginFill(0x80c0ff, alpha * 0.35 * burstA);
+                        g.drawCircle(tx, ty, 28 * burstA + 12);
+                        g.endFill();
+                        // Tighter electric core
+                        g.beginFill(0xe0f0ff, alpha * 0.7 * burstA);
+                        g.drawCircle(tx, ty, 12 * burstA + 6);
+                        g.endFill();
+                        // White-hot center
+                        g.beginFill(0xffffff, Math.min(1, alpha * burstA * 1.2));
+                        g.drawCircle(tx, ty, 5 * burstA + 2);
+                        g.endFill();
+                        // Radial spark spokes
+                        const spokes = 10;
+                        g.lineStyle(2, 0xffffff, alpha * 0.85 * burstA);
+                        for (let i = 0; i < spokes; i++) {
+                            const a = (i / spokes) * Math.PI * 2 + elapsed * 0.02;
+                            const len = 14 + 18 * burstA + Math.random() * 8;
+                            g.moveTo(tx, ty);
+                            g.lineTo(tx + Math.cos(a) * len, ty + Math.sin(a) * len);
+                        }
+                        g.lineStyle(0);
+                    }
+
+                    // Origin-side glow — small steady flicker so the player feels
+                    // like they're actively channeling the bolt.
+                    g.beginFill(0x80c0ff, alpha * 0.45 * strike * flicker);
+                    g.drawCircle(sx, sy, 6 + 2 * Math.sin(elapsed * 0.05));
+                    g.endFill();
+                    g.beginFill(0xffffff, alpha * 0.7 * strike);
+                    g.drawCircle(sx, sy, 3);
+                    g.endFill();
                     break;
                 }
 
