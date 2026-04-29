@@ -1102,7 +1102,25 @@ export class GameState {
                     if (Math.abs(p._smoothY) < 0.1) p._smoothY = 0;
                 }
             } else {
-                // OTHER PLAYERS: lerp toward server position.
+                // OTHER PLAYERS: extrapolate forward using last-known velocity,
+                // then lerp toward the latest server target as a correction.
+                //
+                // The server's dead-reckoning skips ObjectMovePackets for any
+                // entity whose actual position+velocity matches what the
+                // client would predict. Without client-side velocity
+                // extrapolation, the client lerps to the last received
+                // target and then FREEZES until the staleness cap (~750ms)
+                // forces a server resend — visible as 50ms move / 700ms
+                // pause stutter on every walking bot.
+                //
+                // dx/dy is in px/tick at 64Hz, so per-second = dx * 64.
+                if (p.dx !== 0 || p.dy !== 0) {
+                    const tickStep = dt * 64;
+                    p.pos.x += p.dx * tickStep;
+                    p.pos.y += p.dy * tickStep;
+                    p.targetX += p.dx * tickStep;
+                    p.targetY += p.dy * tickStep;
+                }
                 const odx = p.targetX - p.pos.x, ody = p.targetY - p.pos.y;
                 const odist = Math.sqrt(odx * odx + ody * ody);
                 if (odist > SNAP_DISTANCE) {
@@ -1125,19 +1143,29 @@ export class GameState {
             if (p.animTimer > 0.125) { p.animTimer = 0; p.animFrame = ((p.animFrame || 0) + 1) % 2; }
         }
 
-        // Enemies: constant-speed movement toward server position.
-        // Move at a fixed rate that covers the distance in ~31ms (32Hz update interval).
-        // This avoids the lerp problem of "fast then stop" between updates.
+        // Enemies: extrapolate by velocity, then lerp to correct.
+        // Same rationale as the other-players block above: server-side
+        // dead-reckoning sends ObjectMovePackets only when an entity's
+        // actual position diverges from the velocity-based prediction.
+        // The client must continue advancing the entity along its last-
+        // known velocity, otherwise enemies stutter between sparse
+        // server updates.
         for (const [id, e] of this.enemies) {
+            if (e.dx !== 0 || e.dy !== 0) {
+                const tickStep = dt * 64;
+                e.pos.x += e.dx * tickStep;
+                e.pos.y += e.dy * tickStep;
+                e.targetX += e.dx * tickStep;
+                e.targetY += e.dy * tickStep;
+            }
             const dx = e.targetX - e.pos.x, dy = e.targetY - e.pos.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist > SNAP_DISTANCE) {
                 e.pos.x = e.targetX; e.pos.y = e.targetY;
             } else if (dist > 0.3) {
-                // Move at constant speed: cover the distance in ~50ms (slightly longer
-                // than update interval to avoid overshooting)
-                const speed = dist / 0.05; // pixels per second to cover dist in 50ms
-                const step = speed * dt;    // pixels this frame
+                // Constant-speed correction: cover residual drift in ~50ms.
+                const speed = dist / 0.05;
+                const step = speed * dt;
                 if (step >= dist) {
                     e.pos.x = e.targetX; e.pos.y = e.targetY;
                 } else {
