@@ -2083,8 +2083,11 @@ function processInput(dt) {
                     network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
                     lastInvKey = '';
                 } else if (item.targetSlot >= 0 && item.targetSlot <= 3) {
-                    // Equipable item — check class compatibility then swap
-                    if (item.targetClass < 0 || item.targetClass === game.classId) {
+                    // Equipable item — must match the slot AND be useable by
+                    // the player's class. canEquipInSlot mirrors the server
+                    // check; the previous "targetClass < 0" shortcut allowed
+                    // any class-group item to bypass class validation.
+                    if (canEquipInSlot(item, item.targetSlot, game.classId)) {
                         network.sendMoveItem(game.playerId, item.targetSlot, slotIdx, false, false);
                         lastInvKey = '';
                     }
@@ -2394,14 +2397,6 @@ let isMouseOverHud = false; // Prevents shooting/ability when hovering over UI
 let dragSlot = -1; // Slot being dragged (-1 = none)
 let dragEl = null; // Floating drag element
 let _dragOverBag = 0; // Target bag number hovered during drag (0 = none)
-// "Pending" drag — set on mousedown over a populated slot, promoted to a real
-// drag (dragSlot/dragEl) once the cursor moves past DRAG_THRESHOLD_PX. This
-// keeps quick clicks (single + double) from triggering a drag at all, so the
-// dblclick path for consumables fires reliably.
-let pendingDragSlot = -1;
-let pendingDragItem = null;
-let pendingDragX = 0, pendingDragY = 0;
-const DRAG_THRESHOLD_PX = 5;
 let lastLootKey = '';
 let lastTouchTime = 0; // Tracks recent touch events to filter synthetic mouse events
 // Sprite data URL cache to avoid re-extracting every frame
@@ -2917,53 +2912,37 @@ function createSlot(item, label, slotIdx, isLoot = false) {
     lbl.textContent = label;
     div.appendChild(lbl);
 
-    // Single click = select/swap, double-click/tap = consume.
-    // We use BOTH a manual timing window (for touch tap-tap reliability on
-    // mobile) AND the native dblclick event (more reliable on desktop where
-    // OS double-click intervals vary). They route through the same helper
-    // so behavior is identical.
+    // Click / double-tap: single click = select/swap, double click/tap = consume
     let lastClickTime = 0;
-    const tryConsume = () => {
-        if (!item || item.itemId < 0 || !item.consumable) return false;
-        if (slotIdx < 4 || slotIdx > 19) return false;
-        network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
-        lastInvKey = '';
-        lastClickTime = 0;
-        return true;
-    };
     div.addEventListener('click', (e) => {
         e.stopPropagation();
         // Skip click if we just finished a drag
         if (dragSlot >= 0) return;
         const now = Date.now();
-        if (now - lastClickTime < 400 && tryConsume()) return;
+        if (now - lastClickTime < 350 && item && item.itemId >= 0 && item.consumable
+            && slotIdx >= 4 && slotIdx <= 19) {
+            // Double click/tap — consume the item
+            network.sendMoveItem(game.playerId, slotIdx, slotIdx, false, true);
+            lastInvKey = '';
+            lastClickTime = 0;
+            return;
+        }
         lastClickTime = now;
         onSlotClick(slotIdx, item);
-    });
-    // Native double-click for desktop — fires regardless of OS settings.
-    div.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        if (dragSlot >= 0) return;
-        tryConsume();
     });
     // Right click (desktop) = drop
     div.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); onSlotRightClick(slotIdx, item); });
 
-    // Mousedown: don't commit to a drag yet — just record that one MIGHT
-    // be starting. The document-level mousemove handler promotes this to a
-    // real drag once the cursor moves > DRAG_THRESHOLD_PX. This way, quick
-    // clicks and double-clicks don't trigger a drag, and the click /
-    // dblclick handlers fire normally.
+    // Drag start (desktop only - skip on touch devices to not interfere with taps)
     div.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; // left click only
+        // Skip if this is a touch-originated mouse event
         if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return;
+        // Fallback: skip if we've seen a recent touch event (within 500ms)
         if (Date.now() - lastTouchTime < 500) return;
         if (item && item.itemId >= 0) {
-            pendingDragSlot = slotIdx;
-            pendingDragItem = item;
-            pendingDragX = e.clientX;
-            pendingDragY = e.clientY;
+            e.preventDefault();
+            startDrag(slotIdx, item, e);
         }
     });
 
@@ -3161,6 +3140,19 @@ function endDrag(e) {
             // Drop to ground
             network.sendMoveItem(game.playerId, -1, dragSlot, true, false);
         } else {
+            // Equipment-slot validation: when dropping into slots 0-3, the
+            // dragged item MUST match the slot type AND be usable by the
+            // player's class. Mirrors the server check; lets us reject the
+            // drop locally so we don't waste a round-trip and the user gets
+            // immediate feedback (the drag returns to where it started).
+            if (targetIdx >= 0 && targetIdx <= 3) {
+                const dragItem = game.inventory && game.inventory[dragSlot];
+                const def = dragItem && game.itemData ? game.itemData[dragItem.itemId] : null;
+                if (def && !canEquipInSlot(def, targetIdx, game.classId)) {
+                    cleanupDrag();
+                    return;
+                }
+            }
             // Swap between inventory/equipment slots
             network.sendMoveItem(game.playerId, targetIdx, dragSlot, false, false);
         }
@@ -3185,6 +3177,58 @@ function endDrag(e) {
     cleanupDrag();
 }
 
+// Equipment-slot compatibility check — mirrors CharacterClass.isValidUser
+// + the targetSlot match in ServerItemHelper.handleMoveItem. Used by
+// drag-drop and the keyboard equip hotkeys to reject mismatched moves
+// before we send them to the server.
+//
+// targetClass values follow the server enum:
+//   >= 0  : exact class id (must match playerClassId)
+//   -1    : ROBE   (Wizard/Priest/Necromancer/Mystic/Sorcerer)
+//   -2    : LEATHER(Archer/Rogue/Assassin/Trickster/Huntress)
+//   -3    : HEAVY  (Warrior/Knight/Paladin)
+//   -4    : ALL    (any class)
+//   -5..-8: weapon-type groups (STAFF/WAND/DAGGER/BOW user)
+function canEquipInSlot(itemDef, targetSlotIdx, playerClassId) {
+    if (!itemDef) return false;
+    // Consumable + stackable items can't be equipped at all.
+    if (itemDef.consumable) return false;
+    if (itemDef.stackable) return false;
+    // Item must belong in this slot. targetSlot >= 0 means "this exact slot".
+    // targetSlot -1 (auto-assign) is permissive.
+    if (itemDef.targetSlot != null && itemDef.targetSlot >= 0
+            && itemDef.targetSlot !== targetSlotIdx) return false;
+    // Class compatibility.
+    const tc = itemDef.targetClass;
+    if (tc == null || tc === -4) return true; // ALL
+    if (tc >= 0) return tc === playerClassId;
+    // Class groups: Wizard 2 / Priest 3 / Necromancer 8 / Mystic 9 / Sorcerer 11 = ROBE
+    //               Archer 1 / Rogue 0 / Assassin 7 / Trickster 10 / Huntress 12 = LEATHER
+    //               Warrior 4 / Knight 5 / Paladin 6 = HEAVY
+    const ROBE    = new Set([2, 3, 8, 9, 11]);
+    const LEATHER = new Set([0, 1, 7, 10, 12]);
+    const HEAVY   = new Set([4, 5, 6]);
+    // Weapon-type users — same groupings as Java's CharacterClass:
+    //   isStaffUser  -> Wizard, Necromancer, Mystic
+    //   isWandUser   -> Priest, Sorcerer
+    //   isDaggerUser -> Rogue, Assassin, Trickster
+    //   isBowUser    -> Archer, Huntress
+    const STAFF  = new Set([2, 8, 9]);
+    const WAND   = new Set([3, 11]);
+    const DAGGER = new Set([0, 7, 10]);
+    const BOW    = new Set([1, 12]);
+    switch (tc) {
+        case -1: return ROBE.has(playerClassId);
+        case -2: return LEATHER.has(playerClassId);
+        case -3: return HEAVY.has(playerClassId);
+        case -5: return STAFF.has(playerClassId);
+        case -6: return WAND.has(playerClassId);
+        case -7: return DAGGER.has(playerClassId);
+        case -8: return BOW.has(playerClassId);
+        default: return false;
+    }
+}
+
 function cleanupDrag() {
     dragSlot = -1;
     _dragOverBag = 0;
@@ -3192,26 +3236,8 @@ function cleanupDrag() {
     document.querySelectorAll('.inv-tab').forEach(t => t.classList.remove('drag-hover'));
 }
 
-document.addEventListener('mousemove', (e) => {
-    // Promote a pending drag to a real drag once the cursor moves past the
-    // threshold. Below that we treat it as a click so dblclick consume can
-    // fire without a drag flickering on every click.
-    if (pendingDragSlot >= 0 && dragSlot < 0) {
-        const dx = e.clientX - pendingDragX;
-        const dy = e.clientY - pendingDragY;
-        if (dx * dx + dy * dy >= DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
-            startDrag(pendingDragSlot, pendingDragItem, e);
-            pendingDragSlot = -1;
-            pendingDragItem = null;
-        }
-    }
-    moveDrag(e);
-});
-document.addEventListener('mouseup', (e) => {
-    pendingDragSlot = -1;
-    pendingDragItem = null;
-    endDrag(e);
-});
+document.addEventListener('mousemove', moveDrag);
+document.addEventListener('mouseup', endDrag);
 
 // Touch event handlers for drag operations (ensures cleanup on mobile)
 document.addEventListener('touchmove', (e) => {

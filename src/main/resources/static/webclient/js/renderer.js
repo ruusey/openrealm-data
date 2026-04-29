@@ -102,12 +102,137 @@ export class GameRenderer {
         this._damageSlotIdx = 0;
         this._statusSlotIdx = 0;
         this._frameId = 0;                 // increments per render(); used for name-pool TTL
+
+        // ---- Entity pool ----
+        // Per-entity persistent containers + pre-allocated children (shadow,
+        // body sprite, outline sprites, HP/MP bars, optional wading mask).
+        // Replaces the old destroy-and-recreate-every-frame model that caused
+        // GC hitches in dense combat. Keys: 'p:'+id (player), 'e:'+id (enemy),
+        // 'l:'+id (loot), 'po:'+id (portal).
+        this._entityPool = new Map();
+        this._entityFrameId = 0;
+
+        // ---- Y-sort buffer ----
+        // Reused per frame; entries are pulled from a record pool to avoid
+        // per-frame {type,data,y} object allocation.
+        this._sortBuf = [];
+        this._sortRecPool = [];
+        this._sortRecIdx = 0;
+
+        // ---- Bullet pool ----
+        // Fixed-size pool of PIXI.Sprite — bullets toggle .visible instead of
+        // being destroyed/recreated. Created lazily in init() so we know
+        // MAX_RENDERED_BULLETS before allocation.
+        this._bulletPool = [];
+        this._bulletFallbackGfx = null;
+
+        // ---- Persistent VFX graphics ----
+        // One PIXI.Graphics that stays in uiLayer; cleared at start of
+        // renderVisualEffects and redrawn in place. Replaces per-frame
+        // `new PIXI.Graphics()` in the visual-effects block.
+        this._fxGraphics = null;
     }
 
     /** Force tile layer rebuild on next frame (call on realm transition). */
     invalidateTileCache() {
         this._tileCacheKey = null;
         this._billboardSprites = [];
+        // On realm transitions, drop all pooled entities — different entities
+        // exist in the new realm and stale containers would linger invisibly.
+        this._reapEntityPool(true);
+    }
+
+    /** Static y-sort comparator — hoisted to avoid per-frame closure alloc. */
+    static SORT_BY_Y(a, b) { return a.y - b.y; }
+
+    /** Acquire a sort-record from the pool (or create one). Reset by
+     *  resetting _sortRecIdx to 0 each frame. */
+    _acquireSortRec() {
+        let r = this._sortRecPool[this._sortRecIdx];
+        if (!r) {
+            r = { type: 0, data: null, id: 0, y: 0 };
+            this._sortRecPool[this._sortRecIdx] = r;
+        }
+        this._sortRecIdx++;
+        return r;
+    }
+
+    /** Acquire (or create) a pooled entity entry by key. The entry is a
+     *  persistent PIXI.Container plus pre-allocated children. Children are
+     *  built the first time the entity is seen (with `hasOutlines` controlling
+     *  whether 4 outline sprites are pre-allocated for player/enemy entities).
+     *  On subsequent frames, callers mutate position/texture/tint in place
+     *  rather than allocating new PIXI objects. */
+    _acquireEntity(key, hasOutlines) {
+        let e = this._entityPool.get(key);
+        if (e) {
+            e.lastSeenFrame = this._entityFrameId;
+            e.bb.visible = true;
+            return e;
+        }
+        const bb = new PIXI.Container();
+        const shadow = new PIXI.Graphics();
+        const body = new PIXI.Sprite();
+        bb.addChild(shadow);
+        const outlines = [];
+        if (hasOutlines) {
+            for (let i = 0; i < 4; i++) {
+                const ol = new PIXI.Sprite();
+                ol.tint = OUTLINE_TINT;
+                ol.alpha = OUTLINE_ALPHA;
+                bb.addChild(ol);
+                outlines.push(ol);
+            }
+        }
+        bb.addChild(body);
+        // Bars + mask created lazily — only player needs bars, only wading
+        // entities need a mask. Saves ~3 PIXI objects per entity until used.
+        e = {
+            bb, shadow, body, outlines,
+            bars: null, mask: null,
+            cachedTex: null, cachedTint: -1,
+            cachedFlipX: null, cachedWading: null,
+            cachedShadowSize: -1,
+            shadowKind: null, // 'pe' (player/enemy ellipse) | 'l' (loot) | 'po' (portal)
+            hasOutlines,
+            lastSeenFrame: this._entityFrameId,
+        };
+        this._entityPool.set(key, e);
+        this.entityLayer.addChild(bb);
+        return e;
+    }
+
+    /** Hide entity-pool entries not seen this frame, and periodically reap
+     *  long-stale entries (e.g. enemies that have left the realm). */
+    _reapEntityPool(forceAll) {
+        if (forceAll) {
+            for (const [, e] of this._entityPool) this._destroyEntity(e);
+            this._entityPool.clear();
+            return;
+        }
+        // Hide-on-miss every frame so stale containers don't show last-frame
+        // position when an entity briefly drops out of the visible set.
+        for (const e of this._entityPool.values()) {
+            if (e.lastSeenFrame !== this._entityFrameId) {
+                e.bb.visible = false;
+            }
+        }
+        // Periodic prune to bound memory across long sessions.
+        if ((this._entityFrameId & 255) === 0) {
+            const cutoff = this._entityFrameId - 600; // ~10 seconds at 60fps
+            for (const [k, e] of this._entityPool) {
+                if (e.lastSeenFrame < cutoff) {
+                    this._destroyEntity(e);
+                    this._entityPool.delete(k);
+                }
+            }
+        }
+    }
+
+    _destroyEntity(e) {
+        if (!e || !e.bb) return;
+        if (e.bb.parent) e.bb.parent.removeChild(e.bb);
+        try { e.bb.destroy({ children: true }); } catch (_) {}
     }
 
     /** Acquire (or create) the long-lived Text for an entity's name label.
@@ -272,6 +397,26 @@ export class GameRenderer {
         // (screen-space) above healthbars. Never destroyed/cleared per frame.
         this._textContainer = new PIXI.Container();
         this.uiLayer.addChild(this._textContainer);
+
+        // Persistent VFX graphics — cleared and redrawn each frame in place.
+        this._fxGraphics = new PIXI.Graphics();
+        this.uiLayer.addChild(this._fxGraphics);
+        // Keep healthbars and text container above VFX
+        this.uiLayer.addChild(this.healthBarGraphics);
+        this.uiLayer.addChild(this._textContainer);
+
+        // Pre-allocate bullet sprite pool. Sized to match the cap in
+        // renderEntities (MAX_RENDERED_BULLETS). Sprites stay parented to
+        // entityLayer; we toggle .visible per frame and reuse texture/position.
+        const BULLET_POOL_SIZE = 256;
+        for (let i = 0; i < BULLET_POOL_SIZE; i++) {
+            const s = new PIXI.Sprite();
+            s.anchor.set(0.5, 0.5);
+            s.visible = false;
+            this._bulletPool.push(s);
+        }
+        // Persistent fallback graphics for bullets that have no sprite texture.
+        this._bulletFallbackGfx = new PIXI.Graphics();
     }
 
     async loadTexture(key, url) {
@@ -496,16 +641,17 @@ export class GameRenderer {
         this.worldLayer.position.set(Math.round(screenW / 2), Math.round(screenH / 2));
         this.worldLayer.rotation = angle;
 
-        // Clear UI layer (damage text, etc.) - keep healthbar graphics AND the
-        // persistent pooled-text container.
-        const keepers = [this.healthBarGraphics, this._textContainer];
+        // Clear UI layer (damage text, etc.) - keep healthbar graphics, the
+        // persistent VFX graphics, and the pooled-text container.
+        const keepers = [this.healthBarGraphics, this._fxGraphics, this._textContainer];
         for (let i = this.uiLayer.children.length - 1; i >= 0; i--) {
             const child = this.uiLayer.children[i];
             if (keepers.indexOf(child) !== -1) continue;
             this.uiLayer.removeChildAt(i);
             child.destroy();
         }
-        // Ensure both keepers are present (and z-ordered: healthbars under text)
+        // Ensure all keepers are present and z-ordered: VFX under healthbars under text.
+        if (this._fxGraphics.parent !== this.uiLayer) this.uiLayer.addChild(this._fxGraphics);
         if (this.healthBarGraphics.parent !== this.uiLayer) this.uiLayer.addChild(this.healthBarGraphics);
         if (this._textContainer.parent !== this.uiLayer) this.uiLayer.addChild(this._textContainer);
 
@@ -731,49 +877,87 @@ export class GameRenderer {
     }
 
     renderEntities(gameState, angle) {
-        // Destroy all children to free GPU memory
-        for (let i = this.entityLayer.children.length - 1; i >= 0; i--) {
-            this.entityLayer.children[i].destroy();
+        // Pool-based rendering: containers are persistent across frames,
+        // children are mutated in place, and we y-sort by reordering existing
+        // children rather than destroying and recreating everything.
+        this._entityFrameId++;
+
+        // Reuse y-sort buffer + record pool; static comparator avoids closure alloc.
+        const buf = this._sortBuf;
+        buf.length = 0;
+        this._sortRecIdx = 0;
+
+        for (const [id, loot] of gameState.lootContainers) {
+            const r = this._acquireSortRec();
+            r.type = 0; r.data = loot; r.id = id;
+            r.y = loot.pos.y + (loot.size || 32);
+            buf.push(r);
         }
+        for (const [id, portal] of gameState.portals) {
+            const r = this._acquireSortRec();
+            r.type = 1; r.data = portal; r.id = id;
+            r.y = portal.pos.y + (portal.size || 32);
+            buf.push(r);
+        }
+        for (const [id, enemy] of gameState.enemies) {
+            const r = this._acquireSortRec();
+            r.type = 2; r.data = enemy; r.id = id;
+            r.y = enemy.pos.y + (enemy.size || 32);
+            buf.push(r);
+        }
+        for (const [id, player] of gameState.players) {
+            const r = this._acquireSortRec();
+            r.type = 3; r.data = player; r.id = id;
+            r.y = player.pos.y + (player.size || 32);
+            buf.push(r);
+        }
+        buf.sort(GameRenderer.SORT_BY_Y);
+
+        // Render each entity into its pooled container. Each renderXxx mutates
+        // the existing children rather than allocating new ones.
+        for (const ent of buf) {
+            if (ent.type === 0) this.renderLootContainer(ent.data, angle, gameState);
+            else if (ent.type === 1) this.renderPortal(ent.data, angle, gameState);
+            else if (ent.type === 2) this.renderEnemy(ent.data, angle, gameState);
+            else if (ent.type === 3) this.renderPlayer(ent.data, angle, ent.id === gameState.playerId, gameState);
+        }
+
+        // Re-order entityLayer children in y-sorted order. removeChildren
+        // unparents but does NOT destroy — cheap. We then re-add visible
+        // pooled containers in sorted order, followed by bullet pool sprites.
+        // Entries not seen this frame stay unparented (effectively hidden).
         this.entityLayer.removeChildren();
-
-        // Y-sort all entities so things further north render behind things further south.
-        // This creates proper depth: entities behind walls appear behind them.
-        const sortable = [];
-        for (const [id, loot] of gameState.lootContainers)
-            sortable.push({ type: 'loot', data: loot, y: loot.pos.y + (loot.size || 32) });
-        for (const [id, portal] of gameState.portals)
-            sortable.push({ type: 'portal', data: portal, y: portal.pos.y + (portal.size || 32) });
-        for (const [id, enemy] of gameState.enemies)
-            sortable.push({ type: 'enemy', data: enemy, y: enemy.pos.y + (enemy.size || 32) });
-        for (const [id, player] of gameState.players)
-            sortable.push({ type: 'player', data: player, id: id, y: player.pos.y + (player.size || 32) });
-        sortable.sort((a, b) => a.y - b.y);
-
-        for (const ent of sortable) {
-            if (ent.type === 'loot') this.renderLootContainer(ent.data, angle, gameState);
-            else if (ent.type === 'portal') this.renderPortal(ent.data, angle, gameState);
-            else if (ent.type === 'enemy') this.renderEnemy(ent.data, angle, gameState);
-            else if (ent.type === 'player') this.renderPlayer(ent.data, angle, ent.id === gameState.playerId, gameState);
+        for (const ent of buf) {
+            const key = ent.type === 0 ? 'l:' + ent.id
+                      : ent.type === 1 ? 'po:' + ent.id
+                      : ent.type === 2 ? 'e:' + ent.id
+                      : 'p:' + ent.id;
+            const e = this._entityPool.get(key);
+            if (e && e.bb.visible) this.entityLayer.addChild(e.bb);
         }
 
-        // Render bullets — viewport-culled + capped for performance.
-        // Bullets are in world-pixel space inside the rotated worldLayer.
-        const bulletGfx = new PIXI.Graphics();
+        // Render bullets via the persistent bullet sprite pool. Sprites stay
+        // alive across frames; we just toggle .visible and update tex/pos/rot.
+        // Replaces the old per-frame `new PIXI.Sprite()` per visible bullet.
         if (!this._bulletTexCache) this._bulletTexCache = {};
         const screenW = this.app.screen.width, screenH = this.app.screen.height;
-        // Expand cull bounds when rotated since worldLayer is rotated
         const cullMargin = angle !== 0 ? 256 : 64;
         const camX = gameState.cameraX * SCALE, camY = gameState.cameraY * SCALE;
         const halfW = screenW / 2 + cullMargin, halfH = screenH / 2 + cullMargin;
-        const MAX_RENDERED_BULLETS = 200;
-        let bulletCount = 0;
+        const MAX_RENDERED_BULLETS = Math.min(this._bulletPool.length, 200);
         const hideOtherPlayerBullets = !!(gameState.settings
                 && gameState.settings.graphics
                 && gameState.settings.graphics.hideOtherPlayerBullets);
         const localPlayerId = gameState.playerId;
 
+        // Reset fallback graphics in place — no allocation.
+        const bulletGfx = this._bulletFallbackGfx;
+        bulletGfx.clear();
+        let bulletCount = 0;
+
         for (const [id, bullet] of gameState.bullets) {
+            if (bulletCount >= MAX_RENDERED_BULLETS) break;
+
             if (hideOtherPlayerBullets && bullet.flags
                     && bullet.flags.includes(ProjectileFlag.PLAYER_PROJECTILE)) {
                 const isMine = bullet._predicted
@@ -781,13 +965,9 @@ export class GameRenderer {
                 if (!isMine) continue;
             }
 
-            // World-pixel position (no offsetX/Y — worldLayer handles camera)
             const sx = bullet.pos.x * SCALE;
             const sy = bullet.pos.y * SCALE;
-
-            // Viewport culling — approximate distance from camera center
             if (Math.abs(sx - camX) > halfW || Math.abs(sy - camY) > halfH) continue;
-            if (++bulletCount > MAX_RENDERED_BULLETS) break;
 
             const size = (bullet.size || 4) * SCALE;
             const projGroup = gameState.projectileGroups[bullet.projectileId];
@@ -804,24 +984,34 @@ export class GameRenderer {
             }
 
             if (tex) {
-                const spr = new PIXI.Sprite(tex);
-                spr.anchor.set(0.5, 0.5);
+                const spr = this._bulletPool[bulletCount++];
+                if (spr.texture !== tex) spr.texture = tex;
                 spr.x = sx + size / 2;
                 spr.y = sy + size / 2;
                 spr.width = size; spr.height = size;
                 const tfAngle = Math.PI / 2;
                 const angleOffset = projGroup ? parseAngleTemplate(projGroup.angleOffset) : 0;
                 spr.rotation = -bullet.angle + tfAngle + (angleOffset > 0 ? angleOffset : 0);
-                this.entityLayer.addChild(spr);
+                spr.visible = true;
+                this.entityLayer.addChild(spr); // re-parent (was unparented by removeChildren above)
             } else {
                 bulletGfx.beginFill(0xffff80);
                 bulletGfx.drawCircle(sx + size / 2, sy + size / 2, size / 3);
                 bulletGfx.endFill();
             }
         }
+        // Hide the unused tail of the bullet pool.
+        for (let i = bulletCount; i < this._bulletPool.length; i++) {
+            const s = this._bulletPool[i];
+            if (s.visible) s.visible = false;
+        }
+        // Add the fallback graphics if it has anything to draw this frame.
         if (bulletGfx.geometry.graphicsData.length > 0) {
             this.entityLayer.addChild(bulletGfx);
         }
+
+        // Reap entity pool: hide entries not seen this frame, periodic prune.
+        this._reapEntityPool(false);
     }
 
     renderPlayer(player, angle, isLocal, gameState) {
@@ -889,111 +1079,130 @@ export class GameRenderer {
         const wadingClip = wading ? 0.30 : 0;
         const visibleHeight = size * (1 - wadingClip);
 
-        // Billboard container: counter-rotate so player always faces camera.
-        // Round to integer pixels to match the rounded worldLayer.pivot (see
-        // render() line ~368) — without this, the camera quantizes to whole
-        // pixels but the sprite doesn't, producing a sub-pixel forward/back
-        // micro-jitter as the smooth camera advances.
-        const bb = new PIXI.Container();
+        // Acquire pooled entity entry. Children persist across frames.
+        const e = this._acquireEntity('p:' + player.id, true);
+        const bb = e.bb;
         bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
-        // All child positions are relative to container center (-size/2 offsets)
         const lx = -size / 2, ly = -size / 2;
 
-        // Circular ground shadow under player
-        const pShadow = new PIXI.Graphics();
-        pShadow.beginFill(0x000000, 0.3);
-        pShadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
-        pShadow.endFill();
-        bb.addChild(pShadow);
+        // Circular ground shadow — only redraw when size changes.
+        if (e.shadowKind !== 'pe' || e.cachedShadowSize !== size) {
+            e.shadow.clear();
+            e.shadow.beginFill(0x000000, 0.3);
+            e.shadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
+            e.shadow.endFill();
+            e.shadowKind = 'pe';
+            e.cachedShadowSize = size;
+        }
 
         const spW = animDef?.spriteSize || BASE_SPRITE_SIZE;
         const spH = animDef?.spriteHeight || spW;
-        // Resolve dye id: for the local player we keep their own dyeId on
-        // game state too, so a freshly-applied dye paints instantly without
-        // waiting for the next UpdatePacket round-trip.
         const playerDyeId = isLocal ? (gameState.dyeId || player.dyeId || 0) : (player.dyeId || 0);
         const tex = playerDyeId
             ? this.getDyedRegion(sheetKey, classId, frameCol, row, spW, spH, playerDyeId, gameState)
             : this.getRegion(sheetKey, frameCol, row, spW, spH);
         if (tex) {
             const flipX = player.facing === 'left';
-
-            const spr = new PIXI.Sprite(tex);
+            const spr = e.body;
+            if (e.cachedTex !== tex) { spr.texture = tex; e.cachedTex = tex; }
             spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
-            if (flipX) { spr.anchor.set(1, 0); spr.scale.x = -Math.abs(spr.scale.x); }
+            // Anchor only changes on flip transitions; scale sign must be
+            // applied every frame because spr.width=... resets scale.x positive.
+            if (e.cachedFlipX !== flipX) {
+                if (flipX) spr.anchor.set(1, 0);
+                else       spr.anchor.set(0, 0);
+                e.cachedFlipX = flipX;
+            }
+            if (flipX) spr.scale.x = -Math.abs(spr.scale.x);
 
-            // Status effect tinting
+            // Status-effect tint, only assigned when changed (preserves PIXI batching).
             const effects = isLocal ? gameState.effectIds : (player.effectIds || []);
-            if (this._hasEffect(effects, StatusEffect.INVINCIBLE))      spr.tint = 0xFFFFCC;
-            else if (this._hasEffect(effects, StatusEffect.ARMOR_BROKEN)) spr.tint = 0x7060CC;
-            else if (this._hasEffect(effects, StatusEffect.PARALYZED))  spr.tint = 0x888888;
-            else if (this._hasEffect(effects, StatusEffect.STUNNED))    spr.tint = 0x88AACC;
-            else if (this._hasEffect(effects, StatusEffect.STASIS))     spr.tint = 0x333338;
-            else if (this._hasEffect(effects, StatusEffect.INVISIBLE))  spr.tint = 0xCCBB88;
-            else if (this._hasEffect(effects, StatusEffect.BERSERK))    spr.tint = 0xFF6644;
-            else if (this._hasEffect(effects, StatusEffect.DAMAGING))   spr.tint = 0xFFAA66;
-            else if (this._hasEffect(effects, StatusEffect.ARMORED))    spr.tint = 0x8899CC;
-            else if (this._hasEffect(effects, StatusEffect.HEALING))    spr.tint = 0xFF8888;
-            else if (this._hasEffect(effects, StatusEffect.SPEEDY))     spr.tint = 0xBBFF88;
-            else if (this._hasEffect(effects, StatusEffect.DAZED))      spr.tint = 0x9988AA;
-            else if (this._hasEffect(effects, StatusEffect.CURSED))     spr.tint = 0x992255;
-            else if (this._hasEffect(effects, StatusEffect.POISONED))   spr.tint = 0x40CC40;
+            let newTint = 0xFFFFFF;
+            if (this._hasEffect(effects, StatusEffect.INVINCIBLE))      newTint = 0xFFFFCC;
+            else if (this._hasEffect(effects, StatusEffect.ARMOR_BROKEN)) newTint = 0x7060CC;
+            else if (this._hasEffect(effects, StatusEffect.PARALYZED))  newTint = 0x888888;
+            else if (this._hasEffect(effects, StatusEffect.STUNNED))    newTint = 0x88AACC;
+            else if (this._hasEffect(effects, StatusEffect.STASIS))     newTint = 0x333338;
+            else if (this._hasEffect(effects, StatusEffect.INVISIBLE))  newTint = 0xCCBB88;
+            else if (this._hasEffect(effects, StatusEffect.BERSERK))    newTint = 0xFF6644;
+            else if (this._hasEffect(effects, StatusEffect.DAMAGING))   newTint = 0xFFAA66;
+            else if (this._hasEffect(effects, StatusEffect.ARMORED))    newTint = 0x8899CC;
+            else if (this._hasEffect(effects, StatusEffect.HEALING))    newTint = 0xFF8888;
+            else if (this._hasEffect(effects, StatusEffect.SPEEDY))     newTint = 0xBBFF88;
+            else if (this._hasEffect(effects, StatusEffect.DAZED))      newTint = 0x9988AA;
+            else if (this._hasEffect(effects, StatusEffect.CURSED))     newTint = 0x992255;
+            else if (this._hasEffect(effects, StatusEffect.POISONED))   newTint = 0x40CC40;
+            if (e.cachedTint !== newTint) { spr.tint = newTint; e.cachedTint = newTint; }
 
-            // Wading effect: shift sprite down so the character sinks into the
-            // liquid, then mask off the bottom so it looks submerged.
+            // Wading: lazy-allocate the mask Graphics once, reuse across frames.
             if (wading) {
                 const sinkOffset = size * wadingClip;
                 spr.y = ly + sinkOffset;
-                const mask = new PIXI.Graphics();
-                mask.beginFill(0xFFFFFF);
-                mask.drawRect(lx - 2, ly, size + 4, size);
-                mask.endFill();
-                bb.addChild(mask);
-                spr.mask = mask;
-                addSpriteWithOutline(bb, tex, lx, spr.y, size, size,
-                    flipX ? { flipX: true, mask } : { mask });
+                if (!e.mask) {
+                    e.mask = new PIXI.Graphics();
+                    bb.addChild(e.mask);
+                }
+                if (e.cachedWading !== size) {
+                    e.mask.clear();
+                    e.mask.beginFill(0xFFFFFF);
+                    e.mask.drawRect(lx - 2, ly, size + 4, size);
+                    e.mask.endFill();
+                    e.cachedWading = size;
+                }
+                e.mask.visible = true;
+                spr.mask = e.mask;
             } else {
-                addSpriteWithOutline(bb, tex, lx, ly, size, size,
-                    flipX ? { flipX: true } : null);
+                if (e.mask) e.mask.visible = false;
+                spr.mask = null;
+                e.cachedWading = null;
             }
-            bb.addChild(spr);
-        } else {
-            const g = new PIXI.Graphics();
-            g.beginFill(isLocal ? 0x40c040 : 0x4080e0);
-            g.drawRect(lx, ly, size, size);
-            g.endFill();
-            bb.addChild(g);
-        }
 
-        // HP and MP bars above player sprite
+            // Update outline sprites (4 cardinal-offset tinted copies).
+            for (let i = 0; i < 4; i++) {
+                const ox = OUTLINE_OFFSETS[i][0], oy = OUTLINE_OFFSETS[i][1];
+                const ol = e.outlines[i];
+                if (ol.texture !== tex) ol.texture = tex;
+                ol.width = size; ol.height = size; // resets scale to positive
+                ol.y = (wading ? spr.y : ly) + oy;
+                if (flipX) {
+                    ol.anchor.set(1, 0);
+                    ol.scale.x = -Math.abs(ol.scale.x);
+                    ol.x = lx + size + ox;
+                } else {
+                    ol.anchor.set(0, 0);
+                    ol.x = lx + ox;
+                }
+                ol.mask = wading ? e.mask : null;
+                ol.visible = true;
+            }
+        } else {
+            // Texture missing — hide body, hide outlines.
+            e.body.visible = false;
+            for (let i = 0; i < 4; i++) e.outlines[i].visible = false;
+        }
+        if (tex) e.body.visible = true;
+
+        // HP and MP bars — lazy-allocate one Graphics, redraw via clear() (no alloc).
         const barWidth = size;
         const barHeight = 4;
         const barGap = 2;
         const barY = ly - barHeight * 2 - barGap - 4;
-
         const hp = isLocal ? gameState.health : (player.health || 0);
         const maxHp = isLocal ? (gameState.getComputedStats()?.hp || gameState.maxHealth || 100) : (player.maxHealth || 100);
         const mp = isLocal ? gameState.mana : (player.mana || 0);
         const maxMp = isLocal ? (gameState.getComputedStats()?.mp || gameState.maxMana || 100) : (player.maxMana || 100);
         const hpPct = maxHp > 0 ? Math.min(1, hp / maxHp) : 1;
         const mpPct = maxMp > 0 ? Math.min(1, mp / maxMp) : 1;
-
-        const bars = new PIXI.Graphics();
-        bars.beginFill(0x222222, 0.7);
-        bars.drawRect(lx, barY, barWidth, barHeight);
-        bars.endFill();
-        bars.beginFill(0x40c040, 0.9);
-        bars.drawRect(lx, barY, barWidth * hpPct, barHeight);
-        bars.endFill();
-        bars.beginFill(0x222222, 0.7);
-        bars.drawRect(lx, barY + barHeight + barGap, barWidth, barHeight);
-        bars.endFill();
-        bars.beginFill(0x4080e0, 0.9);
-        bars.drawRect(lx, barY + barHeight + barGap, barWidth * mpPct, barHeight);
-        bars.endFill();
-        bb.addChild(bars);
+        if (!e.bars) { e.bars = new PIXI.Graphics(); bb.addChild(e.bars); }
+        const bars = e.bars;
+        bars.clear();
+        bars.beginFill(0x222222, 0.7); bars.drawRect(lx, barY, barWidth, barHeight); bars.endFill();
+        bars.beginFill(0x40c040, 0.9); bars.drawRect(lx, barY, barWidth * hpPct, barHeight); bars.endFill();
+        bars.beginFill(0x222222, 0.7); bars.drawRect(lx, barY + barHeight + barGap, barWidth, barHeight); bars.endFill();
+        bars.beginFill(0x4080e0, 0.9); bars.drawRect(lx, barY + barHeight + barGap, barWidth * mpPct, barHeight); bars.endFill();
+        bars.visible = true;
 
         // Compute the same effective world-space center the sprite renders at,
         // so the (pooled, screen-space) name + status icons stay glued to the
@@ -1032,8 +1241,7 @@ export class GameRenderer {
             const sc = this.worldToScreen(eCxWorld, eCyWorld, gameState);
             this._drawStatusIcons(playerEffects, sc.x, sc.y + iconAnchorY);
         }
-
-        this.entityLayer.addChild(bb);
+        // bb is already parented; renderEntities re-orders the entityLayer.
     }
 
     renderEnemy(enemy, angle, gameState) {
@@ -1041,8 +1249,8 @@ export class GameRenderer {
         const sy = enemy.pos.y * SCALE;
         const size = (enemy.size || PLAYER_SIZE) * SCALE;
 
-        // Billboard container: counter-rotate so enemy faces camera
-        const bb = new PIXI.Container();
+        const e = this._acquireEntity('e:' + enemy.id, true);
+        const bb = e.bb;
         bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
         const lx = -size / 2, ly = -size / 2;
@@ -1055,41 +1263,53 @@ export class GameRenderer {
             tex = this.getRegion(enemyDef.spriteKey, enemyDef.col || 0, enemyDef.row || 0, sw, sh);
         }
 
-        // Shadow
-        const shadowG = new PIXI.Graphics();
-        shadowG.beginFill(0x000000, 0.3);
-        shadowG.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
-        shadowG.endFill();
-        bb.addChild(shadowG);
+        // Shadow — redraw only on size change.
+        if (e.shadowKind !== 'pe' || e.cachedShadowSize !== size) {
+            e.shadow.clear();
+            e.shadow.beginFill(0x000000, 0.3);
+            e.shadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
+            e.shadow.endFill();
+            e.shadowKind = 'pe';
+            e.cachedShadowSize = size;
+        }
 
         if (tex) {
-            const spr = new PIXI.Sprite(tex);
+            const spr = e.body;
+            if (e.cachedTex !== tex) { spr.texture = tex; e.cachedTex = tex; }
             spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
 
+            let newTint = 0xFFFFFF;
             if (enemy.effectIds) {
-                if (this._hasEffect(enemy.effectIds, StatusEffect.STASIS))      spr.tint = 0x333338;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.INVINCIBLE))  spr.tint = 0xFFFFCC;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.ARMOR_BROKEN)) spr.tint = 0x7060CC;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.PARALYZED))   spr.tint = 0x888888;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.STUNNED))     spr.tint = 0x88AACC;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.DAZED))       spr.tint = 0x9988AA;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.CURSED))      spr.tint = 0x992255;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.POISONED))    spr.tint = 0x40CC40;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.BERSERK))     spr.tint = 0xFF6644;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.DAMAGING))    spr.tint = 0xFFAA66;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.ARMORED))     spr.tint = 0x8899CC;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.SPEEDY))      spr.tint = 0xBBFF88;
-                else if (this._hasEffect(enemy.effectIds, StatusEffect.HEALING))     spr.tint = 0xFF8888;
+                if (this._hasEffect(enemy.effectIds, StatusEffect.STASIS))      newTint = 0x333338;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.INVINCIBLE))  newTint = 0xFFFFCC;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.ARMOR_BROKEN)) newTint = 0x7060CC;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.PARALYZED))   newTint = 0x888888;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.STUNNED))     newTint = 0x88AACC;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.DAZED))       newTint = 0x9988AA;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.CURSED))      newTint = 0x992255;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.POISONED))    newTint = 0x40CC40;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.BERSERK))     newTint = 0xFF6644;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.DAMAGING))    newTint = 0xFFAA66;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.ARMORED))     newTint = 0x8899CC;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.SPEEDY))      newTint = 0xBBFF88;
+                else if (this._hasEffect(enemy.effectIds, StatusEffect.HEALING))     newTint = 0xFF8888;
             }
-            addSpriteWithOutline(bb, tex, lx, ly, size, size);
-            bb.addChild(spr);
+            if (e.cachedTint !== newTint) { spr.tint = newTint; e.cachedTint = newTint; }
+
+            // Outline sprites (4 cardinal-offset tinted copies).
+            for (let i = 0; i < 4; i++) {
+                const ox = OUTLINE_OFFSETS[i][0], oy = OUTLINE_OFFSETS[i][1];
+                const ol = e.outlines[i];
+                if (ol.texture !== tex) ol.texture = tex;
+                ol.x = lx + ox; ol.y = ly + oy;
+                ol.width = size; ol.height = size;
+                ol.visible = true;
+            }
+            spr.visible = true;
         } else {
-            const g = new PIXI.Graphics();
-            g.beginFill(0xe04040);
-            g.drawRect(lx, ly, size, size);
-            g.endFill();
-            bb.addChild(g);
+            e.body.visible = false;
+            for (let i = 0; i < 4; i++) e.outlines[i].visible = false;
         }
 
         // Enemy name — pooled (see player-name comment above)
@@ -1110,8 +1330,6 @@ export class GameRenderer {
             const sc = this.worldToScreen(cxWorld, cyWorld, gameState);
             this._drawStatusIcons(enemy.effectIds, sc.x, sc.y + enemyIconAnchorY);
         }
-
-        this.entityLayer.addChild(bb);
     }
 
     // renderBullet removed — bullets are now batched inline in renderEntities()
@@ -1129,17 +1347,20 @@ export class GameRenderer {
         const ox = renderFull ? 0 : fullSize / 4;
         const oy = renderFull ? 0 : fullSize / 4;
 
-        // Billboard container
-        const bb = new PIXI.Container();
+        const e = this._acquireEntity('l:' + loot.id, false);
+        const bb = e.bb;
         bb.position.set(Math.round(sx + ox + size / 2), Math.round(sy + oy + size / 2));
         bb.rotation = -angle;
         const lx = -size / 2, ly = -size / 2;
 
-        const shadowG = new PIXI.Graphics();
-        shadowG.beginFill(0x000000, 0.3);
-        shadowG.drawEllipse(0, size / 2 + size * 0.08, size * 0.35, size * 0.1);
-        shadowG.endFill();
-        bb.addChild(shadowG);
+        if (e.shadowKind !== 'l' || e.cachedShadowSize !== size) {
+            e.shadow.clear();
+            e.shadow.beginFill(0x000000, 0.3);
+            e.shadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.35, size * 0.1);
+            e.shadow.endFill();
+            e.shadowKind = 'l';
+            e.cachedShadowSize = size;
+        }
 
         let tex = null;
         if (lootDef) {
@@ -1152,19 +1373,14 @@ export class GameRenderer {
         }
 
         if (tex) {
-            const spr = new PIXI.Sprite(tex);
+            const spr = e.body;
+            if (e.cachedTex !== tex) { spr.texture = tex; e.cachedTex = tex; }
             spr.x = lx; spr.y = ly;
             spr.width = size; spr.height = size;
-            bb.addChild(spr);
+            spr.visible = true;
         } else {
-            const g = new PIXI.Graphics();
-            g.beginFill(isChest ? 0xc8a86e : 0x8b6914);
-            g.drawRect(lx + 2, ly + 2, size - 4, size - 4);
-            g.endFill();
-            bb.addChild(g);
+            e.body.visible = false;
         }
-
-        this.entityLayer.addChild(bb);
     }
 
     renderPortal(portal, angle, gameState) {
@@ -1172,8 +1388,8 @@ export class GameRenderer {
         const sy = portal.pos.y * SCALE;
         const size = this.tileSize * SCALE;
 
-        // Billboard container
-        const bb = new PIXI.Container();
+        const e = this._acquireEntity('po:' + portal.id, false);
+        const bb = e.bb;
         bb.position.set(Math.round(sx + size / 2), Math.round(sy + size / 2));
         bb.rotation = -angle;
         const lx = -size / 2, ly = -size / 2;
@@ -1187,28 +1403,24 @@ export class GameRenderer {
                                  portalDef.row || 0, sw, sh);
         }
 
-        const portalShadow = new PIXI.Graphics();
-        portalShadow.beginFill(0x000000, 0.3);
-        portalShadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
-        portalShadow.endFill();
-        bb.addChild(portalShadow);
-
-        if (tex) {
-            const spr = new PIXI.Sprite(tex);
-            spr.x = lx; spr.y = ly;
-            spr.width = size; spr.height = size;
-            bb.addChild(spr);
-        } else {
-            const g = new PIXI.Graphics();
-            g.beginFill(0x8040c0, 0.6);
-            g.drawCircle(0, 0, size / 2);
-            g.endFill();
-            g.lineStyle(2, 0xc080ff, 0.8);
-            g.drawCircle(0, 0, size / 2);
-            bb.addChild(g);
+        if (e.shadowKind !== 'po' || e.cachedShadowSize !== size) {
+            e.shadow.clear();
+            e.shadow.beginFill(0x000000, 0.3);
+            e.shadow.drawEllipse(0, size / 2 + size * 0.08, size * 0.4, size * 0.12);
+            e.shadow.endFill();
+            e.shadowKind = 'po';
+            e.cachedShadowSize = size;
         }
 
-        this.entityLayer.addChild(bb);
+        if (tex) {
+            const spr = e.body;
+            if (e.cachedTex !== tex) { spr.texture = tex; e.cachedTex = tex; }
+            spr.x = lx; spr.y = ly;
+            spr.width = size; spr.height = size;
+            spr.visible = true;
+        } else {
+            e.body.visible = false;
+        }
     }
 
     renderHealthBars(gameState, angle) {
@@ -1241,9 +1453,13 @@ export class GameRenderer {
     }
 
     renderVisualEffects(gameState, angle) {
+        // Persistent FX graphics — clear in place each frame instead of
+        // allocating a fresh Graphics object. Always clear, even when no
+        // effects exist this frame, otherwise last-frame draws would linger.
+        const g = this._fxGraphics;
+        g.clear();
         if (!gameState.visualEffects || gameState.visualEffects.length === 0) return;
         const now = Date.now();
-        const g = new PIXI.Graphics();
 
         for (const fx of gameState.visualEffects) {
             const elapsed = now - fx.startTime;
@@ -1638,8 +1854,7 @@ export class GameRenderer {
                 }
             }
         }
-
-        this.uiLayer.addChild(g);
+        // _fxGraphics is permanently parented in init() — no per-frame addChild.
     }
 
     renderDamageTexts(gameState, angle) {
