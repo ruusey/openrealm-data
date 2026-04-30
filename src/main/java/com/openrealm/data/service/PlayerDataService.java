@@ -391,6 +391,24 @@ public class PlayerDataService {
         return current - amount;
     }
 
+    /**
+     * Grant account fame (admin-only path). Mirrors {@link #spendAccountFame}
+     * but adds rather than subtracts. Used by the in-game /fame admin
+     * command to award fame to self or another player.
+     */
+    public synchronized Long grantAccountFame(final String accountUuid, final long amount) throws Exception {
+        if (amount <= 0) throw new Exception("Fame grant amount must be positive");
+        final PlayerAccountEntity account = this.playerAccountRepository.findByAccountUuid(accountUuid);
+        if (account == null) throw new Exception("Account " + accountUuid + " not found");
+        final long current = account.getAccountFame() == null ? 0L : account.getAccountFame();
+        final long updated = current + amount;
+        account.setAccountFame(updated);
+        this.playerAccountRepository.save(account);
+        PlayerDataService.log.info("Granted {} fame to account {} (was {}, now {})",
+                amount, accountUuid, current, updated);
+        return updated;
+    }
+
     public PlayerAccountDto saveAccount(final PlayerAccountDto dto) {
         PlayerAccountEntity entity = this.mapper.map(dto, PlayerAccountEntity.class);
         // ModelMapper drops nested generic fields (stackCount, enchantments) on

@@ -232,5 +232,23 @@
 			"walk_back": { "frames": [{"row": 11, "col": 0}, {"row": 11, "col": 1}], "durations": [8, 8] },
 			"attack_up": { "frames": [{"row": 11, "col": 0}, {"row": 11, "col": 4}, {"row": 11, "col": 5}], "durations": [5, 5, 5] }
 		}
+	},
+	{
+		"objectId": 13,
+		"objectType": "player",
+		"className": "Ninja",
+		"spriteKey": "rotmg-classes-0.png",
+		"spriteSize": 8,
+		"animations": {
+			"idle_side": { "frames": [{"row": 12, "col": 0}], "durations": [999] },
+			"walk_side": { "frames": [{"row": 12, "col": 0}, {"row": 12, "col": 1}], "durations": [8, 8] },
+			"attack_side": { "frames": [{"row": 12, "col": 0}, {"row": 12, "col": 4}, {"row": 12, "col": 5}], "durations": [5, 5, 5] },
+			"idle_front": { "frames": [{"row": 13, "col": 0}], "durations": [999] },
+			"walk_front": { "frames": [{"row": 13, "col": 1}, {"row": 13, "col": 2}], "durations": [8, 8] },
+			"attack_down": { "frames": [{"row": 13, "col": 0}, {"row": 13, "col": 4}, {"row": 13, "col": 5}], "durations": [5, 5, 5] },
+			"idle_back": { "frames": [{"row": 14, "col": 0}], "durations": [999] },
+			"walk_back": { "frames": [{"row": 14, "col": 0}, {"row": 14, "col": 1}], "durations": [8, 8] },
+			"attack_up": { "frames": [{"row": 14, "col": 0}, {"row": 14, "col": 4}, {"row": 14, "col": 5}], "durations": [5, 5, 5] }
+		}
 	}
 ]

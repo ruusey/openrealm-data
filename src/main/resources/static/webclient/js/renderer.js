@@ -311,9 +311,9 @@ export class GameRenderer {
         }
         if (!label) {
             label = new PIXI.Text(sym, {
-                fontSize: 9, fill: 0xFFFFFF,
+                fontSize: 11, fill: 0xFFFFFF,
                 fontFamily: 'OryxSimplex, monospace', fontWeight: 'bold',
-                stroke: 0x000000, strokeThickness: 1
+                stroke: 0x000000, strokeThickness: 2
             });
             label.anchor.set(0.5, 0.5);
             this._textContainer.addChild(label);
@@ -1491,6 +1491,95 @@ export class GameRenderer {
         }
     }
 
+    /**
+     * Draws an armed snare ring with inward-pointing teeth — used by both
+     * trap cases (placed-after-throw and standalone). Distinct from a plain
+     * heal/buff ring because the inward teeth read as "jaws ready to snap".
+     */
+    _drawSnareRing(g, sx, sy, r, elapsed, progress, tierColor, alpha) {
+        const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.004);
+        const fadeAlpha = progress > 0.85 ? (1.0 - progress) / 0.15 : 1.0;
+        const a = fadeAlpha * pulse * alpha;
+        const innerR = r * 0.7;
+
+        // Filled body — darker tier wash so the jaws POP against it.
+        g.beginFill(tierColor, fadeAlpha * 0.22);
+        g.drawCircle(sx, sy, r);
+        g.endFill();
+        g.beginFill(0x000000, fadeAlpha * 0.18);
+        g.drawCircle(sx, sy, innerR);
+        g.endFill();
+
+        // Bold double outer ring — chunky tier-coloured + bright white.
+        g.lineStyle(6, tierColor, a * 0.95);
+        g.drawCircle(sx, sy, r);
+        g.lineStyle(3, 0xffffff, a * 0.9);
+        g.drawCircle(sx, sy, r * 0.97);
+        // Inner snare ring — warm amber so it always reads as "trap"
+        // regardless of the tier-tinted outer.
+        g.lineStyle(2, 0xffaa44, a * 0.85);
+        g.drawCircle(sx, sy, innerR);
+        g.lineStyle(0);
+
+        // INWARD-facing snare teeth. Each tooth's two base vertices sit on
+        // the outer ring at offset angles, with the tip pointing radially
+        // inward toward the center — gives the unmistakable look of jaws
+        // closing around the trigger area. Slow rotation animates them.
+        const teethCount = 14;
+        const baseHalfAng = (Math.PI / teethCount) * 0.7;
+        const tipDepth = Math.max(14, r * 0.18);
+        const rot = elapsed * 0.0015;
+        for (let i = 0; i < teethCount; i++) {
+            const ang = (i / teethCount) * Math.PI * 2 + rot;
+            const baseR = r * 0.99;
+            const tipR = r - tipDepth;
+            // Two base points on the outer ring
+            const b1x = sx + Math.cos(ang - baseHalfAng) * baseR;
+            const b1y = sy + Math.sin(ang - baseHalfAng) * baseR;
+            const b2x = sx + Math.cos(ang + baseHalfAng) * baseR;
+            const b2y = sy + Math.sin(ang + baseHalfAng) * baseR;
+            // Tip pointing INWARD
+            const tx = sx + Math.cos(ang) * tipR;
+            const ty = sy + Math.sin(ang) * tipR;
+            // Outer tier-coloured halo for the tooth
+            g.beginFill(tierColor, a * 0.55);
+            g.drawPolygon([
+                sx + Math.cos(ang - baseHalfAng) * (baseR + 4),
+                sy + Math.sin(ang - baseHalfAng) * (baseR + 4),
+                tx, ty,
+                sx + Math.cos(ang + baseHalfAng) * (baseR + 4),
+                sy + Math.sin(ang + baseHalfAng) * (baseR + 4)
+            ]);
+            g.endFill();
+            // Bright white tooth body
+            g.beginFill(0xffeecc, a * 0.95);
+            g.drawPolygon([b1x, b1y, tx, ty, b2x, b2y]);
+            g.endFill();
+            // Dark tip point — sharper read
+            g.beginFill(0x442200, a * 0.85);
+            g.drawCircle(tx, ty, 1.6);
+            g.endFill();
+        }
+
+        // Center trigger marker — pulsing tier-coloured dot + white core
+        const corePulse = 0.6 + 0.4 * Math.sin(elapsed * 0.012);
+        g.beginFill(tierColor, a * 0.7 * corePulse);
+        g.drawCircle(sx, sy, 6);
+        g.endFill();
+        g.beginFill(0xffffff, a * 0.95);
+        g.drawCircle(sx, sy, 3);
+        g.endFill();
+
+        // Faint danger-zone diagonal lines crossing through the center —
+        // makes the trigger area pop more on busy tile backgrounds.
+        g.lineStyle(2, 0xffaa44, a * 0.55);
+        g.moveTo(sx - innerR * 0.55, sy - innerR * 0.55);
+        g.lineTo(sx + innerR * 0.55, sy + innerR * 0.55);
+        g.moveTo(sx + innerR * 0.55, sy - innerR * 0.55);
+        g.lineTo(sx - innerR * 0.55, sy + innerR * 0.55);
+        g.lineStyle(0);
+    }
+
     renderVisualEffects(gameState, angle) {
         // Persistent FX graphics — clear in place each frame instead of
         // allocating a fresh Graphics object. Always clear, even when no
@@ -1936,72 +2025,18 @@ export class GameRenderer {
                             }
                         }
                     } else {
-                        // Persistent ground trap ring — stays mostly opaque, pulses
-                        const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.004);
-                        const fadeAlpha = progress > 0.85 ? (1.0 - progress) / 0.15 : 1.0;
-
-                        // Outer ring — tier-coloured (T0 silver → T6 purple)
-                        g.lineStyle(3, tierColor, fadeAlpha * pulse * 0.85);
-                        g.drawCircle(sx, sy, r);
-                        // Inner ring (kept warm-amber so the trap still reads
-                        // as "armed" regardless of tier)
-                        g.lineStyle(1, 0xffaa44, fadeAlpha * pulse * 0.5);
-                        g.drawCircle(sx, sy, r * 0.75);
-                        g.lineStyle(0);
-
-                        // Semi-transparent fill — light tier-coloured wash
-                        g.beginFill(tierColor, fadeAlpha * 0.12);
-                        g.drawCircle(sx, sy, r);
-                        g.endFill();
-
-                        // Rotating teeth/spikes around the ring
-                        const teeth = 8;
-                        for (let i = 0; i < teeth; i++) {
-                            const a = (i / teeth) * Math.PI * 2 + elapsed * 0.002;
-                            const tr = r * 0.9;
-                            g.beginFill(0xffcc44, fadeAlpha * pulse * 0.7);
-                            g.drawPolygon([
-                                sx + Math.cos(a) * (tr - 4), sy + Math.sin(a) * (tr - 4),
-                                sx + Math.cos(a - 0.1) * (tr + 4), sy + Math.sin(a - 0.1) * (tr + 4),
-                                sx + Math.cos(a + 0.1) * (tr + 4), sy + Math.sin(a + 0.1) * (tr + 4)
-                            ]);
-                            g.endFill();
-                        }
-
-                        // Center marker
-                        g.beginFill(0xffaa44, fadeAlpha * pulse * 0.4);
-                        g.drawCircle(sx, sy, 3);
-                        g.endFill();
+                        // Persistent ground trap ring — armed snare with
+                        // INWARD-facing teeth. Bright multi-layer ring +
+                        // hazardous fill so the trap is unmistakable, plus
+                        // 14 sharp triangles ringing the perimeter pointing
+                        // toward the center to read as "snare jaws".
+                        this._drawSnareRing(g, sx, sy, r, elapsed, progress, tierColor, alpha);
                     }
                     break;
                 }
 
-                case 7: { // TRAP_PLACED — persistent armed trap ring (same as case 6 AoE)
-                    const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.004);
-                    const fadeAlpha = progress > 0.85 ? (1.0 - progress) / 0.15 : 1.0;
-                    g.lineStyle(3, tierColor, fadeAlpha * pulse * 0.85);
-                    g.drawCircle(sx, sy, r);
-                    g.lineStyle(1, 0xffaa44, fadeAlpha * pulse * 0.5);
-                    g.drawCircle(sx, sy, r * 0.75);
-                    g.lineStyle(0);
-                    g.beginFill(tierColor, fadeAlpha * 0.12);
-                    g.drawCircle(sx, sy, r);
-                    g.endFill();
-                    const teeth = 8;
-                    for (let i = 0; i < teeth; i++) {
-                        const a = (i / teeth) * Math.PI * 2 + elapsed * 0.002;
-                        const tr = r * 0.9;
-                        g.beginFill(0xffcc44, fadeAlpha * pulse * 0.7);
-                        g.drawPolygon([
-                            sx + Math.cos(a) * (tr - 4), sy + Math.sin(a) * (tr - 4),
-                            sx + Math.cos(a - 0.1) * (tr + 4), sy + Math.sin(a - 0.1) * (tr + 4),
-                            sx + Math.cos(a + 0.1) * (tr + 4), sy + Math.sin(a + 0.1) * (tr + 4)
-                        ]);
-                        g.endFill();
-                    }
-                    g.beginFill(0xffaa44, fadeAlpha * pulse * 0.4);
-                    g.drawCircle(sx, sy, 3);
-                    g.endFill();
+                case 7: { // TRAP_PLACED — persistent armed trap ring
+                    this._drawSnareRing(g, sx, sy, r, elapsed, progress, tierColor, alpha);
                     break;
                 }
 
@@ -2139,95 +2174,555 @@ export class GameRenderer {
                     break;
                 }
 
-                case 11: { // KNIGHT_SHOCKWAVE — ground-slam shield bash
-                    // A flat ring expanding outward (NOT a vertical sphere)
-                    // gives the "ground impact" feel. Plus debris pebbles
-                    // and an initial impact flash at the player's feet.
-                    const waveR = r * progress;
-                    const ringAlpha = alpha * (1.0 - progress * 0.4);
-                    // Outer expanding shockwave — chunky double ring
-                    g.lineStyle(6, tierColor, ringAlpha * 0.75);
-                    g.drawCircle(sx, sy, waveR);
-                    g.lineStyle(3, 0xffffff, ringAlpha * 0.9);
-                    g.drawCircle(sx, sy, waveR * 0.9);
-                    g.lineStyle(0);
-                    // Translucent dust fill INSIDE the ring (only the moving
-                    // edge remains visible as the wave passes)
-                    g.beginFill(0xc0a060, alpha * 0.18 * (1.0 - progress));
-                    g.drawCircle(sx, sy, waveR * 0.85);
-                    g.endFill();
-                    // Initial impact flash at the player's feet
-                    if (progress < 0.25) {
-                        const flashA = 1.0 - progress / 0.25;
-                        g.beginFill(0xffffff, flashA * 0.95);
-                        g.drawCircle(sx, sy, 16 * (1 + progress * 2));
+                case 11: { // KNIGHT_SHOCKWAVE — two converging force-arcs
+                    // Conveys "knight bracing and pushing strength behind
+                    // the stun": two parenthesis-shaped arcs ( and ) start
+                    // wide apart and converge toward the cast point as the
+                    // knight winds up, then explode outward as the stun
+                    // releases. Force lines trail behind each arc to
+                    // emphasise the inward push direction.
+                    //
+                    // Phases:
+                    //   0.00–0.55 — wind-up: arcs converge from far apart
+                    //   0.55–0.70 — impact flash at convergence
+                    //   0.70–1.00 — release shockwave radiates out
+
+                    const WIND_END = 0.55;
+                    const FLASH_END = 0.70;
+
+                    // Helper: draw a parenthesis-shaped arc whose visible
+                    // bulge tip is at (tipX, tipY). side=-1 for "(" (left
+                    // bracket bulging left), side=+1 for ")" (right bracket
+                    // bulging right).
+                    const drawForceArc = (tipX, tipY, side, R, span, lineW, color, a) => {
+                        if (a <= 0) return;
+                        const segs = 16;
+                        const ccx = tipX + side * R; // circle center sits opposite the bulge
+                        const ccy = tipY;
+                        const baseAngle = side === -1 ? 0 : Math.PI;
+                        g.lineStyle(lineW, color, a);
+                        for (let i = 0; i <= segs; i++) {
+                            const t = i / segs;
+                            const theta = baseAngle - span / 2 + span * t;
+                            const px = ccx + R * Math.cos(theta);
+                            const py = ccy + R * Math.sin(theta);
+                            if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+                        }
+                        g.lineStyle(0);
+                    };
+
+                    if (progress < FLASH_END) {
+                        // ── Wind-up: arcs compress inward ───────────────
+                        const windT = Math.min(1, progress / WIND_END);
+                        // Ease-in: compression accelerates as it converges
+                        // (squared progress) so the arcs visibly snap inward
+                        // at the end of the wind-up.
+                        const eased = windT * windT;
+                        // Tip distance from cast center
+                        const gapMax = r * 0.95;
+                        const gapMin = r * 0.18;
+                        const gap = gapMax - (gapMax - gapMin) * eased;
+                        // Arc bulge depth grows slightly as compression
+                        // peaks (force is "loading up").
+                        const arcR = 22 + 10 * eased;
+                        // Arc span grows from a moderate curve to a deep one.
+                        const arcSpan = (Math.PI / 180) * (110 + 30 * eased);
+                        // Arcs glow brighter as the wind-up resolves.
+                        const armA = alpha * (0.55 + 0.45 * eased);
+
+                        // Two overlapping draws per arc: tier-coloured outer
+                        // glow + bright white inner blade so the arcs read
+                        // as "edged force lines" not just bracket shapes.
+                        // LEFT arc "(" — bulge tip at (sx - gap, sy)
+                        drawForceArc(sx - gap, sy, -1, arcR, arcSpan, 9, tierColor, armA * 0.9);
+                        drawForceArc(sx - gap, sy, -1, arcR, arcSpan, 4, 0xffffff, armA * 0.95);
+                        // RIGHT arc ")" — bulge tip at (sx + gap, sy)
+                        drawForceArc(sx + gap, sy, +1, arcR, arcSpan, 9, tierColor, armA * 0.9);
+                        drawForceArc(sx + gap, sy, +1, arcR, arcSpan, 4, 0xffffff, armA * 0.95);
+
+                        // Force motion lines trailing behind each arc —
+                        // short ticks pointing AWAY from the cast center so
+                        // they read as "where the arc came from". Length
+                        // shrinks as gap shrinks (force has delivered).
+                        const trailLen = 14 * (1 - eased);
+                        if (trailLen > 1) {
+                            g.lineStyle(2, tierColor, armA * 0.65);
+                            // 3 lines per side, at vertical offsets above and below center
+                            for (let k = -1; k <= 1; k++) {
+                                const yOff = k * (arcR * 0.55);
+                                // Left side — trail extending further LEFT
+                                g.moveTo(sx - gap - arcR * 0.15, sy + yOff);
+                                g.lineTo(sx - gap - arcR * 0.15 - trailLen, sy + yOff);
+                                // Right side — trail extending further RIGHT
+                                g.moveTo(sx + gap + arcR * 0.15, sy + yOff);
+                                g.lineTo(sx + gap + arcR * 0.15 + trailLen, sy + yOff);
+                            }
+                            g.lineStyle(0);
+                        }
+
+                        // Sparks gathering at the cast point — small bright
+                        // dots that pop in as the convergence completes,
+                        // suggesting energy collecting between the arcs.
+                        const sparkA = alpha * eased * eased;
+                        if (sparkA > 0.05) {
+                            const sparks = 6;
+                            for (let i = 0; i < sparks; i++) {
+                                const a = (i / sparks) * Math.PI * 2 + elapsed * 0.012;
+                                const sR = (gapMin + 4) * (0.4 + 0.5 * Math.sin(elapsed * 0.02 + i));
+                                g.beginFill(0xffffff, sparkA);
+                                g.drawCircle(sx + Math.cos(a) * sR, sy + Math.sin(a) * sR, 2.2);
+                                g.endFill();
+                            }
+                        }
+
+                        // Compression flash at the very end of the wind-up
+                        if (progress > WIND_END) {
+                            const flashLocal = (progress - WIND_END) / (FLASH_END - WIND_END);
+                            const flashA = 1 - flashLocal;
+                            g.beginFill(0xffffff, flashA * 0.95);
+                            g.drawCircle(sx, sy, 16 + flashLocal * 14);
+                            g.endFill();
+                            g.beginFill(tierColor, flashA * 0.75);
+                            g.drawCircle(sx, sy, 28 + flashLocal * 22);
+                            g.endFill();
+                        }
+                    } else {
+                        // ── Release: outward shockwave + cardinal cracks ─
+                        const releaseT = (progress - FLASH_END) / (1.0 - FLASH_END);
+                        const waveR = r * (0.4 + releaseT * 0.85);
+                        const ringAlpha = alpha * (1.0 - releaseT * 0.5);
+                        // Chunky double-ring shockwave
+                        g.lineStyle(8, tierColor, ringAlpha * 0.85);
+                        g.drawCircle(sx, sy, waveR);
+                        g.lineStyle(4, 0xffffff, ringAlpha * 0.95);
+                        g.drawCircle(sx, sy, waveR * 0.92);
+                        g.lineStyle(0);
+                        // Faint translucent dust fill behind the front
+                        g.beginFill(tierColor, alpha * 0.12 * (1.0 - releaseT));
+                        g.drawCircle(sx, sy, waveR * 0.88);
                         g.endFill();
-                        g.beginFill(tierColor, flashA * 0.7);
-                        g.drawCircle(sx, sy, 26 * (1 + progress * 2));
-                        g.endFill();
+                        // Cardinal slam cracks radiating outward — same
+                        // four directions as a shield-bash impact would
+                        // produce on the ground.
+                        g.lineStyle(3, tierColor, ringAlpha * 0.8);
+                        for (let b = 0; b < 4; b++) {
+                            const a = b * (Math.PI / 2);
+                            g.moveTo(sx + Math.cos(a) * waveR * 0.2, sy + Math.sin(a) * waveR * 0.2);
+                            g.lineTo(sx + Math.cos(a) * waveR * 1.05, sy + Math.sin(a) * waveR * 1.05);
+                        }
+                        g.lineStyle(0);
+                        // Stun sparkles riding the shockwave front
+                        const sparks = 10;
+                        for (let i = 0; i < sparks; i++) {
+                            const a = (i / sparks) * Math.PI * 2 + elapsed * 0.004;
+                            const sd = waveR * (0.92 + 0.08 * Math.sin(elapsed * 0.01 + i));
+                            g.beginFill(0xffffff, ringAlpha * 0.9);
+                            g.drawCircle(sx + Math.cos(a) * sd, sy + Math.sin(a) * sd, 2.5);
+                            g.endFill();
+                        }
                     }
-                    // Debris pebbles flying outward along the wave front
-                    const pebbles = 10;
-                    for (let i = 0; i < pebbles; i++) {
-                        const a = (i / pebbles) * Math.PI * 2;
-                        const dist = waveR * (0.85 + 0.15 * Math.sin(elapsed * 0.006 + i));
-                        const px = sx + Math.cos(a) * dist;
-                        const py = sy + Math.sin(a) * dist;
-                        g.beginFill(0x665544, ringAlpha * 0.85);
-                        g.drawRect(px - 2, py - 2, 4, 4);
-                        g.endFill();
-                    }
-                    // Cardinal slam-lines (cracks radiating out)
-                    g.lineStyle(3, tierColor, ringAlpha * 0.7);
-                    for (let b = 0; b < 4; b++) {
-                        const a = b * (Math.PI / 2);
-                        g.moveTo(sx + Math.cos(a) * waveR * 0.2, sy + Math.sin(a) * waveR * 0.2);
-                        g.lineTo(sx + Math.cos(a) * waveR * 1.05, sy + Math.sin(a) * waveR * 1.05);
-                    }
-                    g.lineStyle(0);
                     break;
                 }
 
-                case 12: { // WARRIOR_BUFF — battle-cry burst
-                    // Distinct from the priest heal: short-lived radial
-                    // chevrons + tier-coloured flash. Reads as "rallying
-                    // cry" instead of "healing wave".
-                    const buffR = r * (0.5 + progress * 0.55);
-                    // Outer halo
-                    g.beginFill(tierColor, alpha * 0.22);
-                    g.drawCircle(sx, sy, buffR);
+                case 14: { // PALADIN_SEAL — holy cross + divine light pillar
+                    // Distinct from priest heal: a vertical beam of light
+                    // with a radiant gold cross at the caster, ascending
+                    // motes, and a slowly rotating halo. Reads as
+                    // "consecration" rather than "AoE healing pulse".
+                    const baseR = r * (0.55 + 0.45 * progress);
+                    const goldA = alpha;
+
+                    // Vertical pillar of light rising from the player —
+                    // tall translucent rectangle with a soft falloff.
+                    const pillarH = baseR * 2.4;
+                    const pillarW = baseR * 0.55;
+                    g.beginFill(tierColor, goldA * 0.18);
+                    g.drawRect(sx - pillarW, sy - pillarH, pillarW * 2, pillarH);
                     g.endFill();
-                    // Bright tier-coloured ring + white inner ring
-                    g.lineStyle(5, tierColor, alpha * 0.9);
-                    g.drawCircle(sx, sy, buffR);
-                    g.lineStyle(2, 0xffffff, alpha * 0.85);
-                    g.drawCircle(sx, sy, buffR * 0.85);
+                    g.beginFill(0xfff0a0, goldA * 0.30);
+                    g.drawRect(sx - pillarW * 0.55, sy - pillarH * 0.95, pillarW * 1.1, pillarH * 0.95);
+                    g.endFill();
+                    g.beginFill(0xffffff, goldA * 0.45);
+                    g.drawRect(sx - pillarW * 0.20, sy - pillarH * 0.92, pillarW * 0.4, pillarH * 0.92);
+                    g.endFill();
+
+                    // Slowly rotating halo behind the cross — gives the
+                    // cross something to be silhouetted against.
+                    const haloR = baseR * 0.78;
+                    g.beginFill(tierColor, goldA * 0.22);
+                    g.drawCircle(sx, sy - baseR * 0.15, haloR);
+                    g.endFill();
+                    g.lineStyle(3, 0xffe070, goldA * 0.85);
+                    g.drawCircle(sx, sy - baseR * 0.15, haloR);
+                    g.lineStyle(2, 0xffffff, goldA * 0.6);
+                    g.drawCircle(sx, sy - baseR * 0.15, haloR * 0.92);
                     g.lineStyle(0);
-                    // Rotating chevrons (V-shapes) — speed/aggression motif
-                    const chevrons = 8;
-                    for (let i = 0; i < chevrons; i++) {
-                        const a = (i / chevrons) * Math.PI * 2 + elapsed * 0.007;
-                        const cx = sx + Math.cos(a) * buffR * 0.7;
-                        const cy = sy + Math.sin(a) * buffR * 0.7;
-                        // Chevron points outward radially
-                        const ox = Math.cos(a), oy = Math.sin(a);
-                        const tx = -oy, ty = ox; // tangent
-                        g.lineStyle(3, 0xffffff, alpha * 0.95);
-                        g.moveTo(cx - tx * 5 - ox * 2, cy - ty * 5 - oy * 2);
-                        g.lineTo(cx + ox * 6, cy + oy * 6);
-                        g.lineTo(cx + tx * 5 - ox * 2, cy + ty * 5 - oy * 2);
-                        g.lineStyle(0);
+
+                    // Halo radial sun-rays — 12 spokes that pulse with elapsed.
+                    const spokes = 12;
+                    const spokePulse = 0.8 + 0.2 * Math.sin(elapsed * 0.012);
+                    g.lineStyle(2, 0xfff0a0, goldA * 0.7 * spokePulse);
+                    for (let i = 0; i < spokes; i++) {
+                        const a = (i / spokes) * Math.PI * 2 + elapsed * 0.0015;
+                        const inner = haloR * 0.95;
+                        const outer = haloR * (1.15 + 0.08 * Math.sin(elapsed * 0.008 + i));
+                        g.moveTo(sx + Math.cos(a) * inner, sy - baseR * 0.15 + Math.sin(a) * inner);
+                        g.lineTo(sx + Math.cos(a) * outer, sy - baseR * 0.15 + Math.sin(a) * outer);
                     }
-                    // Initial cry flash
-                    if (progress < 0.2) {
-                        const flashA = 1.0 - progress / 0.2;
-                        g.beginFill(0xffffff, flashA * 0.9);
-                        g.drawCircle(sx, sy, buffR * 0.35);
+                    g.lineStyle(0);
+
+                    // The cross itself — vertical beam + horizontal beam,
+                    // each rendered as a stacked outer-glow + bright core.
+                    const crossCx = sx;
+                    const crossCy = sy - baseR * 0.15;
+                    const vH = haloR * 1.55;            // vertical arm length
+                    const vW = haloR * 0.18;            // beam thickness
+                    const hH = haloR * 0.18;            // horizontal arm thickness
+                    const hW = haloR * 1.05;            // horizontal arm length
+                    const hOff = -vH * 0.12;            // horizontal sits slightly above center
+
+                    // Outer tier-coloured glow (slightly bigger so it
+                    // bleeds beyond the white core)
+                    g.beginFill(tierColor, goldA * 0.55);
+                    g.drawRect(crossCx - vW * 1.5, crossCy - vH * 0.55, vW * 3, vH * 1.1);
+                    g.drawRect(crossCx - hW, crossCy + hOff - hH * 1.5, hW * 2, hH * 3);
+                    g.endFill();
+                    // Mid layer — warm gold
+                    g.beginFill(0xffe070, goldA * 0.85);
+                    g.drawRect(crossCx - vW, crossCy - vH * 0.5, vW * 2, vH);
+                    g.drawRect(crossCx - hW * 0.95, crossCy + hOff - hH, hW * 1.9, hH * 2);
+                    g.endFill();
+                    // Bright white-hot core
+                    g.beginFill(0xffffff, Math.min(1, goldA * 1.0));
+                    g.drawRect(crossCx - vW * 0.45, crossCy - vH * 0.5, vW * 0.9, vH);
+                    g.drawRect(crossCx - hW * 0.92, crossCy + hOff - hH * 0.45, hW * 1.84, hH * 0.9);
+                    g.endFill();
+
+                    // Cross-arm endpoint flares (small bright dots at the
+                    // tip of each arm — "stars" on the cross)
+                    const flareR = 4 + 2 * spokePulse;
+                    g.beginFill(0xffffff, goldA * 0.9);
+                    g.drawCircle(crossCx, crossCy - vH * 0.5, flareR);            // top
+                    g.drawCircle(crossCx, crossCy + vH * 0.5, flareR);            // bottom
+                    g.drawCircle(crossCx - hW * 0.95, crossCy + hOff, flareR);    // left
+                    g.drawCircle(crossCx + hW * 0.95, crossCy + hOff, flareR);    // right
+                    g.endFill();
+                    g.beginFill(tierColor, goldA * 0.5);
+                    g.drawCircle(crossCx, crossCy - vH * 0.5, flareR * 1.8);
+                    g.drawCircle(crossCx, crossCy + vH * 0.5, flareR * 1.8);
+                    g.drawCircle(crossCx - hW * 0.95, crossCy + hOff, flareR * 1.8);
+                    g.drawCircle(crossCx + hW * 0.95, crossCy + hOff, flareR * 1.8);
+                    g.endFill();
+
+                    // Ascending divine motes — small bright dots that drift
+                    // upward over the duration. Motes are seeded from the
+                    // ground and rise, fading at the top, like prayer light.
+                    const motes = 14;
+                    for (let i = 0; i < motes; i++) {
+                        const seed = i * 0.61;
+                        // Each mote has its own phase offset so they don't
+                        // all move in lockstep.
+                        const phase = (progress + seed) % 1.0;
+                        const moteA = Math.sin(phase * Math.PI) * goldA;
+                        if (moteA <= 0.05) continue;
+                        // Gentle horizontal drift via per-mote sine
+                        const dx2 = Math.sin(seed * 7 + elapsed * 0.001) * baseR * 0.5;
+                        const my = sy + baseR * 0.6 - phase * pillarH * 1.05;
+                        const mx = sx + dx2;
+                        // Outer warm halo
+                        g.beginFill(0xffe070, moteA * 0.5);
+                        g.drawCircle(mx, my, 5);
+                        g.endFill();
+                        // Bright core
+                        g.beginFill(0xffffff, Math.min(1, moteA));
+                        g.drawCircle(mx, my, 2.5);
                         g.endFill();
                     }
-                    // Pulsing core
-                    const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.025);
-                    g.beginFill(tierColor, alpha * 0.7 * pulse);
+
+                    // Initial consecration flash at cast moment
+                    if (progress < 0.18) {
+                        const flashA = 1.0 - progress / 0.18;
+                        g.beginFill(0xffffff, flashA * 0.95);
+                        g.drawCircle(sx, sy, baseR * 0.55);
+                        g.endFill();
+                        g.beginFill(0xffe070, flashA * 0.7);
+                        g.drawCircle(sx, sy, baseR * 0.85);
+                        g.endFill();
+                    }
+                    break;
+                }
+
+                case 13: { // NINJA_DASH — vortex of slicing blades along the path
+                    // Line from start (sx,sy) to end (targetX,targetY).
+                    const _ts = this.worldToScreen(fx.targetX, fx.targetY, gameState);
+                    const tx = _ts.x, ty = _ts.y;
+                    const dx = tx - sx, dy = ty - sy;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const dirX = dx / dist, dirY = dy / dist;
+                    const perpX = -dirY, perpY = dirX;
+
+                    // ── 1. Dash spine — wide tier aura → bright core ────────
+                    g.lineStyle(24, tierColor, alpha * 0.18);
+                    g.moveTo(sx, sy); g.lineTo(tx, ty);
+                    g.lineStyle(14, tierColor, alpha * 0.42);
+                    g.moveTo(sx, sy); g.lineTo(tx, ty);
+                    g.lineStyle(6, 0xffffff, alpha * 0.88);
+                    g.moveTo(sx, sy); g.lineTo(tx, ty);
+                    g.lineStyle(0);
+
+                    // ── 2. Vortex of orbiting blades ─────────────────────────
+                    // Blades distributed along the dash path. Each one:
+                    //   • orbits perpendicular to the path (gives the
+                    //     "vortex/spiral" read in 2D — alternating signs
+                    //     so blades sweep across opposite sides)
+                    //   • spins fast on its own axis (each blade is a
+                    //     diamond/lens that rotates as it orbits)
+                    //   • pops in late, peaks mid-life, shrinks at the end
+                    // Count scales with dash distance so 3-tile and 5-tile
+                    // dashes both feel proportionally dense.
+                    const bladeCount = Math.max(18, Math.floor(dist / 11));
+                    const ORBIT_AMP = 44;     // perpendicular orbit reach (px)
+                    const ORBIT_SPEED = 0.020; // radians/ms
+                    const SPIN_SPEED = 0.030;  // radians/ms
+                    for (let i = 0; i < bladeCount; i++) {
+                        const t = (i + 0.5) / bladeCount;
+                        // Stagger appearance along the path so the vortex
+                        // fills in front-to-back, not all-at-once.
+                        const appear = t * 0.45;
+                        if (progress < appear) continue;
+                        const local = (progress - appear) / Math.max(0.001, 1 - appear);
+                        let bScale = 1.0;
+                        if (local < 0.15) bScale = local / 0.15;
+                        else if (local > 0.75) bScale = Math.max(0, (1 - local) / 0.25);
+                        if (bScale <= 0) continue;
+
+                        // Orbit center is on the dash line at fraction t
+                        const cx = sx + dx * t;
+                        const cy = sy + dy * t;
+                        // Alternate +/- sign so half the blades sweep one
+                        // side and half the other — true vortex feel rather
+                        // than a single column of bobbing blades.
+                        const sign = (i & 1) ? 1 : -1;
+                        const orbitPhase = sign * (elapsed * ORBIT_SPEED + i * 0.55);
+                        const orbit = Math.sin(orbitPhase) * ORBIT_AMP * bScale;
+                        const bx = cx + perpX * orbit;
+                        const by = cy + perpY * orbit;
+
+                        // Per-blade spin (independent of orbit phase)
+                        const spin = elapsed * SPIN_SPEED + i * 0.4;
+                        const cs = Math.cos(spin), sn = Math.sin(spin);
+
+                        // Outer tier-coloured glow blade
+                        const gLen = 22 * bScale, gWid = 7 * bScale;
+                        g.beginFill(tierColor, alpha * 0.45 * bScale);
+                        g.drawPolygon([
+                            bx + gLen * cs,  by + gLen * sn,
+                            bx - gWid * sn,  by + gWid * cs,
+                            bx - gLen * cs,  by - gLen * sn,
+                            bx + gWid * sn,  by - gWid * cs
+                        ]);
+                        g.endFill();
+
+                        // Inner white-hot blade core
+                        const cLen = 16 * bScale, cWid = 4 * bScale;
+                        g.beginFill(0xffffff, alpha * 0.95 * bScale);
+                        g.drawPolygon([
+                            bx + cLen * cs,  by + cLen * sn,
+                            bx - cWid * sn,  by + cWid * cs,
+                            bx - cLen * cs,  by - cLen * sn,
+                            bx + cWid * sn,  by - cWid * cs
+                        ]);
+                        g.endFill();
+
+                        // Motion-trail line behind the blade tip
+                        // (along negative dash dir so blades feel "left
+                        // behind" by the ninja as they pass through).
+                        const trailLen = 14 * bScale;
+                        g.lineStyle(2, tierColor, alpha * 0.7 * bScale);
+                        g.moveTo(bx + cLen * cs, by + cLen * sn);
+                        g.lineTo(bx + cLen * cs - dirX * trailLen,
+                                 by + cLen * sn - dirY * trailLen);
+                        g.lineStyle(0);
+                    }
+
+                    // ── 3. Cleave strokes — broad slash arcs at intervals ───
+                    // These read as "cuts" rather than orbiting blades. Big
+                    // perpendicular sabre-arcs that pop in along the path.
+                    const slashCount = Math.max(4, Math.floor(dist / 28));
+                    for (let i = 0; i < slashCount; i++) {
+                        const t = (i + 0.5) / slashCount;
+                        const sappear = t * 0.55;
+                        if (progress < sappear) continue;
+                        const slife = (progress - sappear) / Math.max(0.001, 1 - sappear);
+                        const sa = alpha * (1 - slife * 0.7);
+                        const cx = sx + dx * t;
+                        const cy = sy + dy * t;
+                        const reach = 46 * (1 + slife * 0.25);
+                        const ax = cx + perpX * reach;
+                        const ay = cy + perpY * reach;
+                        const bx2 = cx - perpX * reach;
+                        const by2 = cy - perpY * reach;
+                        g.lineStyle(7, tierColor, sa * 0.6);
+                        g.moveTo(ax, ay); g.lineTo(bx2, by2);
+                        g.lineStyle(3, 0xffffff, sa * 0.95);
+                        g.moveTo(ax, ay); g.lineTo(bx2, by2);
+                        g.lineStyle(0);
+                    }
+
+                    // ── 4. Vanish puff at start ─────────────────────────────
+                    const startPuffA = Math.max(0, 1.0 - progress * 1.6);
+                    if (startPuffA > 0) {
+                        g.beginFill(0x808080, startPuffA * 0.6);
+                        g.drawCircle(sx, sy, 16);
+                        g.endFill();
+                        g.beginFill(tierColor, startPuffA * 0.4);
+                        g.drawCircle(sx, sy, 26);
+                        g.endFill();
+                    }
+
+                    // ── 5. Arrival flash + radial sparks at endpoint ────────
+                    const arriveA = (progress < 0.5) ? (1.0 - progress / 0.5) : 0;
+                    if (arriveA > 0) {
+                        g.beginFill(0xffffff, arriveA * 0.9);
+                        g.drawCircle(tx, ty, 12 + arriveA * 10);
+                        g.endFill();
+                        g.beginFill(tierColor, arriveA * 0.6);
+                        g.drawCircle(tx, ty, 26 + arriveA * 14);
+                        g.endFill();
+                        g.lineStyle(2, 0xffffff, arriveA * 0.9);
+                        const spokes = 10;
+                        for (let i = 0; i < spokes; i++) {
+                            const a = (i / spokes) * Math.PI * 2 + elapsed * 0.005;
+                            const inner = 8;
+                            const outer = 22 + arriveA * 18;
+                            g.moveTo(tx + Math.cos(a) * inner, ty + Math.sin(a) * inner);
+                            g.lineTo(tx + Math.cos(a) * outer, ty + Math.sin(a) * outer);
+                        }
+                        g.lineStyle(0);
+                    }
+                    break;
+                }
+
+                case 12: { // WARRIOR_BUFF — gritty battle rally
+                    // Conveys "warrior raising sword and roaring": crossed
+                    // war-blades at center pointing skyward, jagged shockwave
+                    // ring, scattered ember/dust particles, and outward
+                    // chevrons reading as a battle cry pushing nearby
+                    // allies into combat. Distinct from the priest heal —
+                    // sharp/angular shapes and warm orange-red tones layered
+                    // over the tier color rather than a soft glowing ring.
+                    const buffR = r * (0.5 + progress * 0.55);
+                    const earlyA = (progress < 0.35) ? alpha : alpha * (1.0 - (progress - 0.35) / 0.65);
+
+                    // 1. Smoke/dust haze fill — gritty undertone (warm grey)
+                    g.beginFill(0x553322, alpha * 0.22);
+                    g.drawCircle(sx, sy, buffR * 1.1);
+                    g.endFill();
+
+                    // 2. Jagged shockwave ring — instead of a smooth circle,
+                    // draw 16 segments with random radial wobble for a
+                    // "ground cracking under the rally" feel.
+                    const jagSegs = 16;
+                    g.lineStyle(5, tierColor, alpha * 0.85);
+                    for (let i = 0; i < jagSegs; i++) {
+                        const a0 = (i / jagSegs) * Math.PI * 2;
+                        const a1 = ((i + 1) / jagSegs) * Math.PI * 2;
+                        const r0 = buffR * (0.92 + 0.08 * Math.sin(i * 5.7 + elapsed * 0.005));
+                        const r1 = buffR * (0.92 + 0.08 * Math.sin((i + 1) * 5.7 + elapsed * 0.005));
+                        g.moveTo(sx + Math.cos(a0) * r0, sy + Math.sin(a0) * r0);
+                        g.lineTo(sx + Math.cos(a1) * r1, sy + Math.sin(a1) * r1);
+                    }
+                    g.lineStyle(0);
+
+                    // 3. Crossed war-blades raised high at the center —
+                    // two diagonal stretched diamonds that spread apart
+                    // slightly over the duration, like swords being thrown
+                    // up in defiance. Tier-coloured glow + bright steel core.
+                    const bladeAngle1 = -Math.PI / 4 + Math.sin(elapsed * 0.004) * 0.06;
+                    const bladeAngle2 = -Math.PI * 3 / 4 - Math.sin(elapsed * 0.004) * 0.06;
+                    const bladeLen = buffR * 0.55;
+                    const bladeWid = 6;
+                    const drawBlade = (cx, cy, ang) => {
+                        const cs = Math.cos(ang), sn = Math.sin(ang);
+                        // Outer warm glow (orange-red flame heat)
+                        g.beginFill(0xff8030, alpha * 0.55);
+                        g.drawPolygon([
+                            cx + bladeLen * 1.1 * cs,            cy + bladeLen * 1.1 * sn,
+                            cx - (bladeWid + 3) * sn,            cy + (bladeWid + 3) * cs,
+                            cx - bladeLen * 0.55 * cs,           cy - bladeLen * 0.55 * sn,
+                            cx + (bladeWid + 3) * sn,            cy - (bladeWid + 3) * cs
+                        ]);
+                        g.endFill();
+                        // Steel-bright core
+                        g.beginFill(0xffffff, alpha * 0.95);
+                        g.drawPolygon([
+                            cx + bladeLen * cs,             cy + bladeLen * sn,
+                            cx - bladeWid * sn,             cy + bladeWid * cs,
+                            cx - bladeLen * 0.5 * cs,       cy - bladeLen * 0.5 * sn,
+                            cx + bladeWid * sn,             cy - bladeWid * cs
+                        ]);
+                        g.endFill();
+                    };
+                    drawBlade(sx, sy, bladeAngle1);
+                    drawBlade(sx, sy, bladeAngle2);
+
+                    // 4. Outward war-cry chevrons — rotating "V" marks
+                    // pointing OUTWARD from the warrior, reading as
+                    // "rally lines" pushing allies forward.
+                    const chevs = 8;
+                    for (let i = 0; i < chevs; i++) {
+                        const a = (i / chevs) * Math.PI * 2 + elapsed * 0.005;
+                        const cx = sx + Math.cos(a) * buffR * 0.78;
+                        const cy = sy + Math.sin(a) * buffR * 0.78;
+                        const ox = Math.cos(a), oy = Math.sin(a);
+                        const tx = -oy, ty = ox; // tangent perpendicular
+                        // Bigger, sharper chevrons than before — gritty look
+                        g.lineStyle(4, tierColor, alpha * 0.85);
+                        g.moveTo(cx - tx * 8 - ox * 4, cy - ty * 8 - oy * 4);
+                        g.lineTo(cx + ox * 9, cy + oy * 9);
+                        g.lineTo(cx + tx * 8 - ox * 4, cy + ty * 8 - oy * 4);
+                        g.lineStyle(2, 0xffe0c0, alpha * 0.95);
+                        g.moveTo(cx - tx * 8 - ox * 4, cy - ty * 8 - oy * 4);
+                        g.lineTo(cx + ox * 9, cy + oy * 9);
+                        g.lineTo(cx + tx * 8 - ox * 4, cy + ty * 8 - oy * 4);
+                        g.lineStyle(0);
+                    }
+
+                    // 5. Embers scattering outward — orange/red dust motes
+                    // riding the shockwave front. Alternate sizes for grit.
+                    const embers = 18;
+                    for (let i = 0; i < embers; i++) {
+                        const seed = i * 0.91;
+                        const a = (seed * 6.28) + elapsed * 0.004;
+                        const dist = buffR * (0.85 + 0.20 * Math.sin(elapsed * 0.008 + seed));
+                        const ex = sx + Math.cos(a) * dist;
+                        const ey = sy + Math.sin(a) * dist;
+                        const sz = (i & 1) ? 3 : 2;
+                        // Hot inner ember
+                        g.beginFill(0xff6020, alpha * 0.85);
+                        g.drawRect(ex - sz, ey - sz, sz * 2, sz * 2);
+                        g.endFill();
+                        // Cooling outer
+                        g.beginFill(0x884400, alpha * 0.55);
+                        g.drawRect(ex - sz - 1, ey - sz - 1, sz * 2 + 2, sz * 2 + 2);
+                        g.endFill();
+                    }
+
+                    // 6. Initial roar flash — short, angry pulse at cast
+                    if (progress < 0.18) {
+                        const flashA = 1.0 - progress / 0.18;
+                        g.beginFill(0xffe0c0, flashA * 0.95);
+                        g.drawCircle(sx, sy, buffR * 0.28);
+                        g.endFill();
+                        g.beginFill(0xff8030, flashA * 0.7);
+                        g.drawCircle(sx, sy, buffR * 0.5);
+                        g.endFill();
+                    }
+
+                    // 7. Throbbing core — warm tier tint pulsing as the
+                    // rally aura pumps into nearby allies.
+                    const corePulse = 0.6 + 0.4 * Math.sin(elapsed * 0.022);
+                    g.beginFill(tierColor, earlyA * 0.65 * corePulse);
                     g.drawCircle(sx, sy, buffR * 0.22);
                     g.endFill();
                     break;
@@ -2267,23 +2762,27 @@ export class GameRenderer {
         0xc060ff  // T6 purple
     ];
 
-    // Status effect icon definitions: [effectId, symbol, color]
+    // Status effect icon definitions: [effectId, label, color]
+    // Labels are short abbreviations rather than single glyphs so a
+    // teammate can read at a glance whether they're slowed, paralysed,
+    // damage-boosted, etc. Buffs use "+" and debuffs use "-" suffix
+    // where the effect modifies a stat.
     static STATUS_ICON_DEFS = [
-        [StatusEffect.HEALING,      '+', 0xFF4444],   // red medical cross
-        [StatusEffect.BERSERK,      'X', 0xFF6644],   // crossed swords / berserk
-        [StatusEffect.SPEEDY,       '>', 0x44FF44],   // green arrow / speed boost
-        [StatusEffect.INVINCIBLE,   'O', 0x44AAFF],   // blue shield / invulnerable
-        [StatusEffect.ARMORED,      'A', 0x6688CC],   // blue-grey armor
-        [StatusEffect.DAMAGING,     '!', 0xFFAA44],   // orange damage boost
-        [StatusEffect.PARALYZED,    '=', 0x888888],   // grey paralysis
-        [StatusEffect.STUNNED,      '*', 0x88CCFF],   // blue stun stars
-        [StatusEffect.SLOWED,       'v', 0x6688FF],   // blue slow arrow
-        [StatusEffect.POISONED,     '~', 0x40CC40],   // green poison
-        [StatusEffect.CURSED,       'C', 0xAA2255],   // purple curse
-        [StatusEffect.DAZED,        '?', 0x9988AA],   // purple daze
-        [StatusEffect.STASIS,       '#', 0x444448],   // dark stasis
-        [StatusEffect.ARMOR_BROKEN, 'V', 0x7060CC],   // purple broken armor
-        [StatusEffect.INVISIBLE,    'I', 0xCCBB88],   // tan invisibility
+        [StatusEffect.HEALING,      'Heal',  0xFF4444],   // HoT
+        [StatusEffect.SPEEDY,       'Spd+',  0x44FF44],   // movement speed up
+        [StatusEffect.BERSERK,      'Aspd+', 0xFF6644],   // attack speed up
+        [StatusEffect.DAMAGING,     'Atk+',  0xFFAA44],   // attack damage up
+        [StatusEffect.ARMORED,      'Armr+', 0x6688CC],   // defense up
+        [StatusEffect.INVINCIBLE,   'Invuln',0x44AAFF],   // invulnerable
+        [StatusEffect.INVISIBLE,    'Hide',  0xCCBB88],   // stealth
+        [StatusEffect.SLOWED,       'Slow',  0x6688FF],   // movement speed down
+        [StatusEffect.PARALYZED,    'Para',  0x888888],   // can't move
+        [StatusEffect.STUNNED,      'Stun',  0x88CCFF],   // can't act
+        [StatusEffect.STASIS,       'Stasis',0x444448],   // frozen
+        [StatusEffect.DAZED,        'Daze',  0x9988AA],   // disoriented
+        [StatusEffect.POISONED,     'Pois',  0x40CC40],   // DoT
+        [StatusEffect.CURSED,       'Curse', 0xAA2255],   // damage taken up
+        [StatusEffect.ARMOR_BROKEN, 'Armr-', 0x7060CC],   // defense down
     ];
 
     /**
@@ -2300,28 +2799,39 @@ export class GameRenderer {
     _drawStatusIcons(effectIds, screenCenterX, screenTopY) {
         if (!effectIds || !effectIds.length) return;
         const active = [];
-        for (const [eid, sym, color] of GameRenderer.STATUS_ICON_DEFS) {
-            if (this._hasEffect(effectIds, eid)) active.push({ sym, color });
+        for (const [eid, label, color] of GameRenderer.STATUS_ICON_DEFS) {
+            if (this._hasEffect(effectIds, eid)) active.push({ label, color });
         }
         if (active.length === 0) return;
 
-        const iconSize = 12;
+        // Vertical stack of pill-shaped chips above the entity. Bottommost
+        // chip sits just above the head (screenTopY); each additional
+        // effect stacks upward. Reads in two passes — colour to identify
+        // the effect, abbreviation text to confirm what it does.
+        const iconW = 40;
+        const iconH = 14;
         const iconGap = 2;
-        const totalWidth = active.length * iconSize + (active.length - 1) * iconGap;
-        let startX = screenCenterX - totalWidth / 2;
-        const y = screenTopY - iconSize - 2;
-
-        for (const { sym, color } of active) {
-            const { bg, label } = this._acquireStatusIcon(sym);
-            bg.beginFill(0x000000, 0.6);
-            bg.drawRoundedRect(startX, y, iconSize, iconSize, 2);
+        const bottomY = screenTopY - 2;
+        const x = screenCenterX - iconW / 2;
+        for (let i = 0; i < active.length; i++) {
+            const { label: text, color } = active[i];
+            // i = 0 is bottommost (just above entity), grows upward.
+            const y = bottomY - (i + 1) * (iconH + iconGap);
+            const { bg, label } = this._acquireStatusIcon(text);
+            // Black border + drop shadow for legibility on busy tiles
+            bg.beginFill(0x000000, 0.85);
+            bg.drawRoundedRect(x - 1, y - 1, iconW + 2, iconH + 2, 4);
             bg.endFill();
-            bg.beginFill(color, 0.9);
-            bg.drawRoundedRect(startX + 1, y + 1, iconSize - 2, iconSize - 2, 1);
+            // Coloured body (effect identity)
+            bg.beginFill(color, 0.92);
+            bg.drawRoundedRect(x, y, iconW, iconH, 3);
             bg.endFill();
-            label.x = startX + iconSize / 2;
-            label.y = y + iconSize / 2;
-            startX += iconSize + iconGap;
+            // Subtle highlight strip along top edge for a more polished look
+            bg.beginFill(0xffffff, 0.18);
+            bg.drawRoundedRect(x + 1, y + 1, iconW - 2, 3, 2);
+            bg.endFill();
+            label.x = screenCenterX;
+            label.y = y + iconH / 2;
         }
     }
 

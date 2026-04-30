@@ -18,7 +18,7 @@ export const StatusEffect = {
     ARMORED: 18, BERSERK: 19, SLOWED: 21, ARMOR_BROKEN: 22
 };
 
-export const CLASS_NAMES = ['Rogue', 'Archer', 'Wizard', 'Priest', 'Warrior', 'Knight', 'Paladin', 'Assassin', 'Necromancer', 'Mystic', 'Trickster', 'Sorcerer', 'Huntress'];
+export const CLASS_NAMES = ['Rogue', 'Archer', 'Wizard', 'Priest', 'Warrior', 'Knight', 'Paladin', 'Assassin', 'Necromancer', 'Mystic', 'Trickster', 'Sorcerer', 'Huntress', 'Ninja'];
 
 // Circle-collision radius factor for projectile vs entity hit detection.
 // radius = sprite_size * BULLET_HIT_RADIUS_FACTOR. Mirrors GlobalConstants.HIT_RADIUS_FACTOR
@@ -559,6 +559,7 @@ export class GameState {
                     existing._snapTime = performance.now();
                 }
                 existing.dx = p.dX; existing.dy = p.dY;
+                existing._lastVelUpdate = performance.now();
                 continue;
             }
             this.players.set(p.id, {
@@ -567,6 +568,7 @@ export class GameState {
                 _prevX: p.pos.x, _prevY: p.pos.y,
                 _snapX: p.pos.x, _snapY: p.pos.y,
                 _snapTime: performance.now(),
+                _lastVelUpdate: performance.now(),
                 animFrame: 0, animTimer: 0, facing: 'right'
             });
         }
@@ -592,6 +594,16 @@ export class GameState {
                 existing.maxHealth = e.maxHealth;
                 existing.dx = e.dX; existing.dy = e.dY;
                 existing.health = useHealth;
+                // Refresh velocity timestamp + record the authoritative
+                // server position. The extrapolation cap in
+                // updateInterpolation() uses _lastVelUpdate to detect a
+                // stale entity and snaps pos back to _serverPosX/Y so an
+                // enemy that drifted off-screen during the silent window
+                // is yanked back to its last on-map position instead of
+                // freezing in the void.
+                existing._lastVelUpdate = performance.now();
+                existing._serverPosX = e.pos.x;
+                existing._serverPosY = e.pos.y;
                 // Update interpolation target only when the server position
                 // actually changed. Tiny floats (sub-pixel) are no-ops to
                 // avoid resetting _snapTime on every tick which would also
@@ -610,6 +622,8 @@ export class GameState {
                 _prevX: e.pos.x, _prevY: e.pos.y,
                 _snapX: e.pos.x, _snapY: e.pos.y,
                 _snapTime: performance.now(),
+                _lastVelUpdate: performance.now(),
+                _serverPosX: e.pos.x, _serverPosY: e.pos.y,
                 animFrame: 0, animTimer: 0,
                 effectIds: [],
                 health: useHealth,
@@ -794,6 +808,7 @@ export class GameState {
                     }
                     if (id !== this.playerId) {
                         p.dx = mov.velX; p.dy = mov.velY;
+                        p._lastVelUpdate = performance.now();
                         // Apply attack animation state from server
                         if (mov.attacking) {
                             p.attacking = true;
@@ -806,6 +821,11 @@ export class GameState {
                 if (e) {
                     e.targetX = mov.posX; e.targetY = mov.posY;
                     e.dx = mov.velX; e.dy = mov.velY;
+                    // Refresh extrapolation timestamp + last known server
+                    // position — see LoadPacket handler.
+                    e._lastVelUpdate = performance.now();
+                    e._serverPosX = mov.posX;
+                    e._serverPosY = mov.posY;
                 }
             } else if (t === 2) {
                 const b = this.bullets.get(id);
@@ -1114,12 +1134,19 @@ export class GameState {
                 // pause stutter on every walking bot.
                 //
                 // dx/dy is in px/tick at 64Hz, so per-second = dx * 64.
+                // Same extrapolation cap as the enemy block below — stop
+                // sliding peers along their last velocity once the server
+                // has gone silent for >1200ms.
                 if (p.dx !== 0 || p.dy !== 0) {
-                    const tickStep = dt * 64;
-                    p.pos.x += p.dx * tickStep;
-                    p.pos.y += p.dy * tickStep;
-                    p.targetX += p.dx * tickStep;
-                    p.targetY += p.dy * tickStep;
+                    if (p._lastVelUpdate != null && (performance.now() - p._lastVelUpdate) > 1200) {
+                        p.dx = 0; p.dy = 0;
+                    } else {
+                        const tickStep = dt * 64;
+                        p.pos.x += p.dx * tickStep;
+                        p.pos.y += p.dy * tickStep;
+                        p.targetX += p.dx * tickStep;
+                        p.targetY += p.dy * tickStep;
+                    }
                 }
                 const odx = p.targetX - p.pos.x, ody = p.targetY - p.pos.y;
                 const odist = Math.sqrt(odx * odx + ody * ody);
@@ -1150,13 +1177,37 @@ export class GameState {
         // The client must continue advancing the entity along its last-
         // known velocity, otherwise enemies stutter between sparse
         // server updates.
+        //
+        // EXTRAPOLATION CAP: server's MAX_STALE_TICKS is 48 (~750ms), so
+        // any entity in the player's viewport gets a velocity refresh
+        // within that window. If we haven't seen one in 1200ms, the entity
+        // has dropped out of viewport and the server has stopped pushing
+        // updates — keep extrapolating and the enemy drifts off the map
+        // into the abyss. Zero the velocity once we cross that threshold
+        // so the enemy parks at its last known position instead of
+        // sliding into the void.
+        const EXTRAP_CAP_MS = 1200;
+        const nowMs = performance.now();
         for (const [id, e] of this.enemies) {
             if (e.dx !== 0 || e.dy !== 0) {
-                const tickStep = dt * 64;
-                e.pos.x += e.dx * tickStep;
-                e.pos.y += e.dy * tickStep;
-                e.targetX += e.dx * tickStep;
-                e.targetY += e.dy * tickStep;
+                if (e._lastVelUpdate != null && (nowMs - e._lastVelUpdate) > EXTRAP_CAP_MS) {
+                    // Cap fired — snap back to the last server-known position
+                    // so an enemy that drifted off-map during the silent
+                    // window doesn't get permanently stranded in the void.
+                    e.dx = 0; e.dy = 0;
+                    if (e._serverPosX != null) {
+                        e.pos.x = e._serverPosX;
+                        e.pos.y = e._serverPosY;
+                        e.targetX = e._serverPosX;
+                        e.targetY = e._serverPosY;
+                    }
+                } else {
+                    const tickStep = dt * 64;
+                    e.pos.x += e.dx * tickStep;
+                    e.pos.y += e.dy * tickStep;
+                    e.targetX += e.dx * tickStep;
+                    e.targetY += e.dy * tickStep;
+                }
             }
             const dx = e.targetX - e.pos.x, dy = e.targetY - e.pos.y;
             const dist = Math.sqrt(dx * dx + dy * dy);

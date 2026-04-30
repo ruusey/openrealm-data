@@ -176,6 +176,24 @@ public class PlayerDataController {
         return res;
     }
 
+    /**
+     * Admin-only: award account fame to a specific account. Used by the
+     * in-game /fame command. Returns the updated total.
+     */
+    @PostMapping(value = "/account/{accountUuid}/fame/grant", produces = { "application/json" })
+    @AdminRestricted
+    public ResponseEntity<?> grantFame(final HttpServletRequest request, @PathVariable final String accountUuid,
+            @RequestParam("amount") final long amount) {
+        ResponseEntity<?> res = null;
+        try {
+            final Long newTotal = this.playerDataService.grantAccountFame(accountUuid, amount);
+            res = ApiUtils.buildSuccess(newTotal);
+        } catch (Exception e) {
+            res = ApiUtils.buildAndLogError("Failed to grant fame", e.getMessage());
+        }
+        return res;
+    }
+
     @DeleteMapping(value = "/account/character/{characterUuid}", produces = { "application/json" })
     public ResponseEntity<?> deleteCharacter(final HttpServletRequest request, @PathVariable String characterUuid,
             @RequestParam(name = "bankFame", required = false, defaultValue = "false") boolean bankFame,

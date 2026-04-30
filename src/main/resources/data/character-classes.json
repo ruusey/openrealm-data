@@ -388,5 +388,35 @@
 			"1": 288,
 			"2": 32
 		}
+	},
+	{
+		"spriteOffset": 12,
+		"classId": 13,
+		"className": "Ninja",
+		"baseStats": {
+			"spd": 12,
+			"att": 12,
+			"dex": 12,
+			"wis": 10,
+			"vit": 10,
+			"def": 0,
+			"hp": 130,
+			"mp": 100
+		},
+		"maxStats": {
+			"spd": 60,
+			"att": 75,
+			"dex": 60,
+			"wis": 50,
+			"vit": 40,
+			"def": 25,
+			"hp": 700,
+			"mp": 252
+		},
+		"startingEquipment": {
+			"0": 91,
+			"1": 298,
+			"2": 32
+		}
 	}
 ]
