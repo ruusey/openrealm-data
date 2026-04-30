@@ -925,6 +925,12 @@ export class GameRenderer {
             buf.push(r);
         }
         for (const [id, enemy] of gameState.enemies) {
+            // Skip dead enemies. Server's UnloadPacket can lag under heavy
+            // load (1000+ enemy stress test), leaving zero-HP corpses in the
+            // map for several seconds. Client-side predicted hits set
+            // health=0 immediately — hide them right away so the screen
+            // doesn't fill with phantom sprites waiting to be unloaded.
+            if (enemy.maxHealth > 0 && enemy.health <= 0) continue;
             const r = this._acquireSortRec();
             r.type = 2; r.data = enemy; r.id = id;
             r.y = enemy.pos.y + (enemy.size || 32);
