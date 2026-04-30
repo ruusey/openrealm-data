@@ -92,11 +92,7 @@ function showScreen(name) {
             loginToken = api.sessionToken;
             // Fetch the full player account (with characters, etc.)
             account = await api.getAccount(authAccount.accountGuid);
-            try {
-                const animData = await api.getGameData('animations.json');
-                _animDataByClass = {};
-                if (Array.isArray(animData)) animData.forEach(a => { if (a.objectType === 'player') _animDataByClass[a.objectId] = a; });
-            } catch (e) { /* non-critical */ }
+            await preloadCharSelectData();
             showCharacterSelect();
             return;
         }
@@ -132,12 +128,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         loginToken = loginData.token;
         api.saveSession();
         account = await api.getAccount(loginData.accountGuid);
-        // Load animation data for character select icons (front-facing idle)
-        try {
-            const animData = await api.getGameData('animations.json');
-            _animDataByClass = {};
-            if (Array.isArray(animData)) animData.forEach(a => { if (a.objectType === 'player') _animDataByClass[a.objectId] = a; });
-        } catch (e) { /* non-critical */ }
+        await preloadCharSelectData();
         showCharacterSelect();
     } catch (err) {
         errorEl.textContent = err.message;
@@ -233,11 +224,7 @@ document.getElementById('guest-btn').addEventListener('click', async (e) => {
                 loginToken = loginData.token;
                 api.saveSession();
                 account = await api.getAccount(loginData.accountGuid);
-                try {
-                    const animData = await api.getGameData('animations.json');
-                    _animDataByClass = {};
-                    if (Array.isArray(animData)) animData.forEach(a => { if (a.objectType === 'player') _animDataByClass[a.objectId] = a; });
-                } catch (e) { /* non-critical */ }
+                await preloadCharSelectData();
                 localChatRole = 'demo';
                 showCharacterSelect();
                 return;
@@ -268,11 +255,7 @@ document.getElementById('guest-btn').addEventListener('click', async (e) => {
             localStorage.setItem('or_guest_password', password);
         } catch (e) { /* storage unavailable */ }
         account = await api.getAccount(loginData.accountGuid);
-        try {
-            const animData = await api.getGameData('animations.json');
-            _animDataByClass = {};
-            if (Array.isArray(animData)) animData.forEach(a => { if (a.objectType === 'player') _animDataByClass[a.objectId] = a; });
-        } catch (e) { /* non-critical */ }
+        await preloadCharSelectData();
         localChatRole = 'demo';
 
         // Show guest credentials popup so the user can save them
@@ -323,25 +306,105 @@ const ALL_CLASSES = [
 let selectedClassId = null;
 let _animDataByClass = {}; // classId -> animation model, loaded once for char select icons
 
-// Draw the idle_front frame for a class using animations.json data, with fallback to legacy math
-function drawClassIcon(canvas, classId) {
+// Cache of dyed 8x8 canvases keyed by `${classId}:${row}:${col}:${dyeId}`.
+// Declared BEFORE drawClassIcon so the function body never hits a TDZ
+// reference if it's called before the let initializer runs.
+let _dyedIconCache = null;
+
+// Draw the idle_front frame for a class, applying the per-character dyeId
+// (luminance-preserving recolor through the class mask). Mirrors the in-game
+// renderer's getDyedRegion so a black-dyed wizard on the char-select screen
+// looks the same as in-game. dyeId is optional — 0 / undefined renders the
+// bare sprite.
+function drawClassIcon(canvas, classId, dyeId) {
+    try {
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const anim = _animDataByClass[classId];
+    let frame, sheetKey;
     if (anim && anim.animations && anim.animations.idle_front) {
-        const frame = anim.animations.idle_front.frames[0];
-        const img = _charSpriteSheets[anim.spriteKey.replace('.png', '')];
-        if (img) {
-            ctx.drawImage(img, frame.col * 8, frame.row * 8, 8, 8, 0, 0, canvas.width, canvas.height);
+        frame = anim.animations.idle_front.frames[0];
+        sheetKey = anim.spriteKey.replace('.png', '');
+    } else {
+        // Fallback: legacy side-idle
+        const sheetIdx = Math.floor(classId / 3);
+        const localRow = (classId % 3) * 4;
+        frame = { row: localRow, col: 0 };
+        sheetKey = `rotmg-classes-${sheetIdx}`;
+    }
+    const img = _charSpriteSheets[sheetKey];
+    if (!img) return;
+
+    const SPRITE_W = 8, SPRITE_H = 8;
+    const dye = (dyeId && dyeId > 0 && game.dyeAssets) ? game.dyeAssets[dyeId] : null;
+    const maskKey = `${classId}:${frame.row}:${frame.col}`;
+    const maskFrame = (dye && game.classMaskFrameIndex) ? game.classMaskFrameIndex[maskKey] : null;
+
+    // No dye / no mask available → blit the raw cell (existing behaviour).
+    if (!dye || !maskFrame || !maskFrame.mask) {
+        ctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H, SPRITE_W, SPRITE_H,
+                0, 0, canvas.width, canvas.height);
+        return;
+    }
+
+    // Render the cell to an 8x8 offscreen canvas at 1:1, recolour masked
+    // pixels, then upscale into the target canvas. Cached per
+    // (classId, row, col, dyeId) so repeated renders skip the work.
+    if (!_dyedIconCache) _dyedIconCache = {};
+    const cacheKey = `${classId}:${frame.row}:${frame.col}:${dyeId}`;
+    let dyedCanvas = _dyedIconCache[cacheKey];
+    if (!dyedCanvas) {
+        dyedCanvas = document.createElement('canvas');
+        dyedCanvas.width = SPRITE_W; dyedCanvas.height = SPRITE_H;
+        const dctx = dyedCanvas.getContext('2d');
+        dctx.imageSmoothingEnabled = false;
+        try {
+            dctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H,
+                    SPRITE_W, SPRITE_H, 0, 0, SPRITE_W, SPRITE_H);
+        } catch (e) {
+            // CORS-tainted canvas — fall back to raw blit.
+            ctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H, SPRITE_W, SPRITE_H,
+                    0, 0, canvas.width, canvas.height);
             return;
         }
+        let imgData;
+        try { imgData = dctx.getImageData(0, 0, SPRITE_W, SPRITE_H); }
+        catch (e) {
+            ctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H, SPRITE_W, SPRITE_H,
+                    0, 0, canvas.width, canvas.height);
+            return;
+        }
+        const px = imgData.data;
+        if (dye.type === 'solid') {
+            const dr = (dye.color >> 16) & 0xff;
+            const dg = (dye.color >> 8) & 0xff;
+            const db = dye.color & 0xff;
+            for (let y = 0; y < SPRITE_H; y++) {
+                const maskRow = maskFrame.mask[y];
+                if (!maskRow) continue;
+                for (let x = 0; x < SPRITE_W; x++) {
+                    if (!maskRow[x]) continue;
+                    const i = (y * SPRITE_W + x) * 4;
+                    if (px[i + 3] === 0) continue;
+                    // Luminance-preserving channel scale (matches renderer)
+                    const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+                    const scale = lum / 128;
+                    px[i]     = Math.min(255, Math.max(0, dr * scale));
+                    px[i + 1] = Math.min(255, Math.max(0, dg * scale));
+                    px[i + 2] = Math.min(255, Math.max(0, db * scale));
+                }
+            }
+            dctx.putImageData(imgData, 0, 0);
+        }
+        _dyedIconCache[cacheKey] = dyedCanvas;
     }
-    // Fallback: legacy side-idle
-    const sheetIdx = Math.floor(classId / 3);
-    const localRow = (classId % 3) * 4;
-    const img = _charSpriteSheets[`rotmg-classes-${sheetIdx}`];
-    if (img) ctx.drawImage(img, 0, localRow * 8, 8, 8, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(dyedCanvas, 0, 0, SPRITE_W, SPRITE_H, 0, 0, canvas.width, canvas.height);
+    } catch (err) {
+        // Swallow render errors so a single bad dye/mask/sprite can't
+        // halt the surrounding script (e.g. char-select panel build).
+        console.warn('[drawClassIcon] render failed for class', classId, 'dye', dyeId, err);
+    }
 }
 
 // Preloaded item definitions for graveyard display (loaded once)
@@ -361,6 +424,55 @@ async function ensureItemDefs() {
 // / getBaseFame so the character-select cards can display the same lvl + xp/fame
 // the in-game HUD and leaderboard do, without needing a player instance.
 let _expMapCache = null;
+
+// Preload data needed by the character-select screen (anim icons + exp levels
+// for level/fame display). All login paths funnel through showCharacterSelect,
+// and exp-levels.json is otherwise only loaded once the user enters the game —
+// without this preload, every char card renders "Lv 1 · Fame 0" regardless of
+// the actual XP. Each fetch is wrapped so a single failure doesn't block render.
+async function preloadCharSelectData() {
+    try {
+        const animData = await api.getGameData('animations.json');
+        _animDataByClass = {};
+        if (Array.isArray(animData)) {
+            animData.forEach(a => { if (a.objectType === 'player') _animDataByClass[a.objectId] = a; });
+        }
+    } catch (e) { /* non-critical */ }
+    try {
+        const expData = await api.getGameData('exp-levels.json');
+        if (expData) {
+            game.expLevels = expData;
+            _expMapCache = null; // invalidate so first computeLevelFame rebuilds
+        }
+    } catch (e) { /* non-critical */ }
+    // Load dye assets + class-recolor masks so character icons honour the
+    // dyeId stored on each character. Without these, char-select shows the
+    // bare sprite even for a black-dyed wizard.
+    try {
+        const dyeAssets = await api.getGameData('dye-assets.json');
+        if (Array.isArray(dyeAssets)) {
+            game.dyeAssets = {};
+            for (const d of dyeAssets) game.dyeAssets[d.dyeId] = d;
+        }
+    } catch (e) { /* non-critical */ }
+    try {
+        const classMaskData = await api.getGameData('character-class-masks.json');
+        if (Array.isArray(classMaskData)) {
+            game.classMasks = {};
+            game.classMaskFrameIndex = {};
+            for (const entry of classMaskData) {
+                game.classMasks[entry.classId] = entry;
+                if (Array.isArray(entry.frames)) {
+                    for (const f of entry.frames) {
+                        game.classMaskFrameIndex[`${entry.classId}:${f.row}:${f.col}`] = f;
+                    }
+                }
+            }
+        }
+    } catch (e) { /* non-critical */ }
+    // Item defs needed for the equipment hover tooltip + weapon sprite.
+    try { await ensureItemDefs(); } catch (e) { /* non-critical */ }
+}
 function getExpMap() {
     if (_expMapCache) return _expMapCache;
     if (!game.expLevels || !game.expLevels.levelExperienceMap) return null;
@@ -447,7 +559,9 @@ function showCharacterSelect() {
             const classId = char.characterClass || 0;
             const cvs = document.createElement('canvas');
             cvs.width = 40; cvs.height = 40;
-            drawClassIcon(cvs, classId);
+            // Apply the character's dye if set so the card shows their
+            // actual cosmetic, not the bare sprite.
+            drawClassIcon(cvs, classId, stats.dyeId || 0);
             iconDiv.appendChild(cvs);
 
             const infoDiv = document.createElement('div');
@@ -546,7 +660,7 @@ async function renderGraveyard(deadChars) {
         cvs.width = 40; cvs.height = 40;
         cvs.style.opacity = '0.5';
         cvs.style.filter = 'grayscale(80%)';
-        drawClassIcon(cvs, classId);
+        drawClassIcon(cvs, classId, char.stats?.dyeId || 0);
         iconDiv.appendChild(cvs);
 
         const infoDiv = document.createElement('div');
@@ -619,7 +733,8 @@ async function loadLeaderboard() {
             const icon = document.createElement('canvas');
             icon.width = 24; icon.height = 24;
             icon.style.cssText = 'vertical-align:middle;margin-right:6px';
-            drawClassIcon(icon, entry.characterClass || 0);
+            drawClassIcon(icon, entry.characterClass || 0,
+                    entry.dyeId || entry.stats?.dyeId || 0);
 
             const info = document.createElement('span');
             info.className = 'lb-info';
@@ -677,7 +792,14 @@ function showEquipmentTooltip(event, entry) {
         if (equip && equip.itemId >= 0) {
             const itemDef = game.itemData?.[equip.itemId] || _graveyardItemDefs?.[equip.itemId];
             const name = itemDef?.name || `Item ${equip.itemId}`;
-            const spriteUrl = getItemSpriteUrl({ itemId: equip.itemId });
+            // Pass the equip directly so enchantments paint onto the
+            // sprite — without this, char-select hover showed the bare
+            // item even when the player had forged on it.
+            const spriteUrl = getItemSpriteUrl({
+                itemId: equip.itemId,
+                uid: equip.itemUuid || equip.uid,
+                enchantments: equip.enchantments || []
+            });
             const imgTag = spriteUrl
                 ? `<img src="${spriteUrl}" class="lb-tooltip-sprite">`
                 : '<span class="lb-tooltip-sprite-empty"></span>';

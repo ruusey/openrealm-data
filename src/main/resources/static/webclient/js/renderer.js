@@ -2174,152 +2174,214 @@ export class GameRenderer {
                     break;
                 }
 
-                case 11: { // KNIGHT_SHOCKWAVE — two converging force-arcs
-                    // Conveys "knight bracing and pushing strength behind
-                    // the stun": two parenthesis-shaped arcs ( and ) start
-                    // wide apart and converge toward the cast point as the
-                    // knight winds up, then explode outward as the stun
-                    // releases. Force lines trail behind each arc to
-                    // emphasise the inward push direction.
+                case 11: { // KNIGHT_SHOCKWAVE — forward thrust shield bash
+                    // Conveys "knight winds up behind, then THRUSTS the
+                    // shield FORWARD with the stun". Force chevrons start
+                    // crouched behind the knight, then sweep forward
+                    // through them and beyond, ending in a heavy slam at
+                    // the front. Direction comes from the line-effect's
+                    // start (knight) → target (cursor) so the visual
+                    // tracks the projectile direction exactly.
                     //
                     // Phases:
-                    //   0.00–0.55 — wind-up: arcs converge from far apart
-                    //   0.55–0.70 — impact flash at convergence
-                    //   0.70–1.00 — release shockwave radiates out
+                    //   0.00–0.30 — wind-up: chevrons gathered behind
+                    //   0.30–0.70 — thrust: chevrons sweep forward through
+                    //   0.70–0.85 — slam impact at the front
+                    //   0.85–1.00 — fading aftermath shockwave
 
-                    const WIND_END = 0.55;
-                    const FLASH_END = 0.70;
+                    const _ts11 = this.worldToScreen(fx.targetX, fx.targetY, gameState);
+                    const tx11 = _ts11.x, ty11 = _ts11.y;
+                    let kdx = tx11 - sx, kdy = ty11 - sy;
+                    const kdist = Math.sqrt(kdx * kdx + kdy * kdy);
+                    // If start == target (no aim direction), fall back to
+                    // facing right so the visual still has an axis.
+                    const dirX = kdist > 0.5 ? kdx / kdist : 1;
+                    const dirY = kdist > 0.5 ? kdy / kdist : 0;
+                    const perpX = -dirY, perpY = dirX;
 
-                    // Helper: draw a parenthesis-shaped arc whose visible
-                    // bulge tip is at (tipX, tipY). side=-1 for "(" (left
-                    // bracket bulging left), side=+1 for ")" (right bracket
-                    // bulging right).
-                    const drawForceArc = (tipX, tipY, side, R, span, lineW, color, a) => {
-                        if (a <= 0) return;
-                        const segs = 16;
-                        const ccx = tipX + side * R; // circle center sits opposite the bulge
-                        const ccy = tipY;
-                        const baseAngle = side === -1 ? 0 : Math.PI;
-                        g.lineStyle(lineW, color, a);
-                        for (let i = 0; i <= segs; i++) {
-                            const t = i / segs;
-                            const theta = baseAngle - span / 2 + span * t;
-                            const px = ccx + R * Math.cos(theta);
-                            const py = ccy + R * Math.sin(theta);
-                            if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+                    // Forward reach in screen pixels — how far the thrust
+                    // extends in front of the knight at peak.
+                    const REACH = 130;
+                    const WINDUP_END = 0.30;
+                    const THRUST_END = 0.70;
+                    const SLAM_END = 0.85;
+
+                    // ── Ground-shadow streak along the thrust axis ──────
+                    // Faint dark band on the ground from the knight to the
+                    // slam point — gives the thrust visual weight.
+                    const streakStart = -40;
+                    const streakEnd = REACH * Math.min(1.2, progress * 1.4);
+                    const startX = sx + dirX * streakStart, startY = sy + dirY * streakStart;
+                    const endX = sx + dirX * streakEnd, endY = sy + dirY * streakEnd;
+                    g.lineStyle(28, tierColor, alpha * 0.10);
+                    g.moveTo(startX, startY); g.lineTo(endX, endY);
+                    g.lineStyle(16, tierColor, alpha * 0.22);
+                    g.moveTo(startX, startY); g.lineTo(endX, endY);
+                    g.lineStyle(6, 0x000000, alpha * 0.45);
+                    g.moveTo(startX, startY); g.lineTo(endX, endY);
+                    g.lineStyle(0);
+
+                    // ── Force chevrons sweeping forward ─────────────────
+                    // 6 chevrons stagger in along the thrust axis. Each
+                    // chevron is a V-shape pointing forward, with its
+                    // axial position along the dash line driven by
+                    // (progress - phaseOffset). At wind-up they crouch
+                    // behind the knight; during thrust they fly forward
+                    // through the player and out the front.
+                    const chevCount = 6;
+                    for (let i = 0; i < chevCount; i++) {
+                        // Per-chevron phase offset so the back chevrons
+                        // emerge first, leading chevrons trail behind a
+                        // fraction of a beat.
+                        const phaseOff = i * 0.045;
+                        // Position along thrust axis: -0.6 (behind knight)
+                        // → +1.2 (past the slam point).
+                        let lt;
+                        if (progress < WINDUP_END) {
+                            // Wind-up: gather behind. Lines drift slightly
+                            // backward as the knight braces.
+                            const t = progress / WINDUP_END;
+                            lt = -0.55 - 0.10 * t - i * 0.08;
+                        } else if (progress < THRUST_END) {
+                            // Thrust: ease-in-out forward.
+                            const t = Math.max(0, Math.min(1,
+                                    (progress - WINDUP_END - phaseOff)
+                                    / (THRUST_END - WINDUP_END - phaseOff)));
+                            const eased = t * t * (3 - 2 * t);
+                            const startLT = -0.55 - 0.10 - i * 0.08;
+                            const endLT = 1.20 - i * 0.05;
+                            lt = startLT + (endLT - startLT) * eased;
+                        } else {
+                            // Slam aftermath: chevrons hold at the front,
+                            // fading.
+                            lt = 1.20 - i * 0.05;
                         }
+
+                        const cx = sx + dirX * REACH * lt;
+                        const cy = sy + dirY * REACH * lt;
+                        // Fade based on how close the chevron is to its
+                        // active range (-0.6 to 1.2). Beyond that, fade.
+                        const ltClamped = Math.max(-0.7, Math.min(1.3, lt));
+                        const distFromCore = Math.max(0, ltClamped - 1.0);
+                        const aheadFade = 1 - distFromCore * 1.8;
+                        const fade = alpha * Math.max(0.2, aheadFade) * (1 - i * 0.06);
+
+                        // Chevron geometry: V-shape, tip pointing forward.
+                        // Larger trailing chevrons, smaller leading ones.
+                        const arm = 22 - i * 2.2;
+                        const tipFwd = arm * 0.55;
+                        const tipX = cx + dirX * tipFwd;
+                        const tipY = cy + dirY * tipFwd;
+                        const back1X = cx + perpX * arm - dirX * arm * 0.4;
+                        const back1Y = cy + perpY * arm - dirY * arm * 0.4;
+                        const back2X = cx - perpX * arm - dirX * arm * 0.4;
+                        const back2Y = cy - perpY * arm - dirY * arm * 0.4;
+
+                        // Outer tier-coloured stroke
+                        g.lineStyle(7, tierColor, fade * 0.85);
+                        g.moveTo(back1X, back1Y);
+                        g.lineTo(tipX, tipY);
+                        g.lineTo(back2X, back2Y);
+                        // Inner black underlay for silhouette pop on bright tiles
+                        g.lineStyle(3, 0x000000, fade * 0.6);
+                        g.moveTo(back1X, back1Y);
+                        g.lineTo(tipX, tipY);
+                        g.lineTo(back2X, back2Y);
+                        // Bright white core
+                        g.lineStyle(2, 0xffffff, fade * 0.95);
+                        g.moveTo(back1X, back1Y);
+                        g.lineTo(tipX, tipY);
+                        g.lineTo(back2X, back2Y);
                         g.lineStyle(0);
-                    };
+                    }
 
-                    if (progress < FLASH_END) {
-                        // ── Wind-up: arcs compress inward ───────────────
-                        const windT = Math.min(1, progress / WIND_END);
-                        // Ease-in: compression accelerates as it converges
-                        // (squared progress) so the arcs visibly snap inward
-                        // at the end of the wind-up.
-                        const eased = windT * windT;
-                        // Tip distance from cast center
-                        const gapMax = r * 0.95;
-                        const gapMin = r * 0.18;
-                        const gap = gapMax - (gapMax - gapMin) * eased;
-                        // Arc bulge depth grows slightly as compression
-                        // peaks (force is "loading up").
-                        const arcR = 22 + 10 * eased;
-                        // Arc span grows from a moderate curve to a deep one.
-                        const arcSpan = (Math.PI / 180) * (110 + 30 * eased);
-                        // Arcs glow brighter as the wind-up resolves.
-                        const armA = alpha * (0.55 + 0.45 * eased);
+                    // ── Brace flash behind knight during wind-up ────────
+                    // Small tier-coloured dust burst at the knight's feet
+                    // as they crouch into the thrust.
+                    if (progress < WINDUP_END) {
+                        const wt = progress / WINDUP_END;
+                        const brakeA = alpha * (1 - wt) * 0.7;
+                        const braceX = sx - dirX * 18;
+                        const braceY = sy - dirY * 18;
+                        g.beginFill(0x553322, brakeA * 0.5);
+                        g.drawCircle(braceX, braceY, 14 + wt * 8);
+                        g.endFill();
+                        g.beginFill(tierColor, brakeA * 0.4);
+                        g.drawCircle(braceX, braceY, 10 + wt * 6);
+                        g.endFill();
+                    }
 
-                        // Two overlapping draws per arc: tier-coloured outer
-                        // glow + bright white inner blade so the arcs read
-                        // as "edged force lines" not just bracket shapes.
-                        // LEFT arc "(" — bulge tip at (sx - gap, sy)
-                        drawForceArc(sx - gap, sy, -1, arcR, arcSpan, 9, tierColor, armA * 0.9);
-                        drawForceArc(sx - gap, sy, -1, arcR, arcSpan, 4, 0xffffff, armA * 0.95);
-                        // RIGHT arc ")" — bulge tip at (sx + gap, sy)
-                        drawForceArc(sx + gap, sy, +1, arcR, arcSpan, 9, tierColor, armA * 0.9);
-                        drawForceArc(sx + gap, sy, +1, arcR, arcSpan, 4, 0xffffff, armA * 0.95);
-
-                        // Force motion lines trailing behind each arc —
-                        // short ticks pointing AWAY from the cast center so
-                        // they read as "where the arc came from". Length
-                        // shrinks as gap shrinks (force has delivered).
-                        const trailLen = 14 * (1 - eased);
-                        if (trailLen > 1) {
-                            g.lineStyle(2, tierColor, armA * 0.65);
-                            // 3 lines per side, at vertical offsets above and below center
-                            for (let k = -1; k <= 1; k++) {
-                                const yOff = k * (arcR * 0.55);
-                                // Left side — trail extending further LEFT
-                                g.moveTo(sx - gap - arcR * 0.15, sy + yOff);
-                                g.lineTo(sx - gap - arcR * 0.15 - trailLen, sy + yOff);
-                                // Right side — trail extending further RIGHT
-                                g.moveTo(sx + gap + arcR * 0.15, sy + yOff);
-                                g.lineTo(sx + gap + arcR * 0.15 + trailLen, sy + yOff);
+                    // ── Slam impact at the front ───────────────────────
+                    // Big punchy burst when the thrust reaches its peak.
+                    // Anchored at the FRONT of the thrust (REACH px ahead
+                    // of the knight in the dash direction).
+                    if (progress >= WINDUP_END) {
+                        const slamProg = Math.max(0, Math.min(1,
+                                (progress - WINDUP_END) / (SLAM_END - WINDUP_END)));
+                        // Slam alpha peaks near the THRUST_END moment, then fades.
+                        const slamPeak = (THRUST_END - WINDUP_END) / (SLAM_END - WINDUP_END);
+                        let slamA;
+                        if (slamProg <= slamPeak) {
+                            slamA = slamProg / slamPeak;
+                        } else {
+                            slamA = Math.max(0, 1 - (slamProg - slamPeak) / (1 - slamPeak));
+                        }
+                        slamA *= alpha;
+                        if (slamA > 0.02) {
+                            const slamX = sx + dirX * REACH;
+                            const slamY = sy + dirY * REACH;
+                            // Big tier halo
+                            g.beginFill(tierColor, slamA * 0.55);
+                            g.drawCircle(slamX, slamY, 38 + slamA * 18);
+                            g.endFill();
+                            // White-hot core
+                            g.beginFill(0xffffff, slamA * 0.95);
+                            g.drawCircle(slamX, slamY, 18 + slamA * 10);
+                            g.endFill();
+                            // Inner punch dot
+                            g.beginFill(tierColor, slamA);
+                            g.drawCircle(slamX, slamY, 8);
+                            g.endFill();
+                            // 12 radial spokes around the slam — heavy
+                            // shield-bash impact lines.
+                            g.lineStyle(3, 0xffffff, slamA * 0.9);
+                            const spokes = 12;
+                            for (let i = 0; i < spokes; i++) {
+                                const a = (i / spokes) * Math.PI * 2;
+                                const inner = 12;
+                                const outer = 28 + slamA * 22;
+                                g.moveTo(slamX + Math.cos(a) * inner, slamY + Math.sin(a) * inner);
+                                g.lineTo(slamX + Math.cos(a) * outer, slamY + Math.sin(a) * outer);
+                            }
+                            g.lineStyle(0);
+                            // Forward-only crack lines (asymmetric — the
+                            // bash pushes ENERGY forward, not equally in
+                            // all directions).
+                            g.lineStyle(4, tierColor, slamA * 0.85);
+                            for (let i = -1; i <= 1; i++) {
+                                const tilt = i * 0.45;
+                                const cTilt = Math.cos(tilt), sTilt = Math.sin(tilt);
+                                const fX = dirX * cTilt - dirY * sTilt;
+                                const fY = dirY * cTilt + dirX * sTilt;
+                                g.moveTo(slamX, slamY);
+                                g.lineTo(slamX + fX * (40 + slamA * 30), slamY + fY * (40 + slamA * 30));
                             }
                             g.lineStyle(0);
                         }
+                    }
 
-                        // Sparks gathering at the cast point — small bright
-                        // dots that pop in as the convergence completes,
-                        // suggesting energy collecting between the arcs.
-                        const sparkA = alpha * eased * eased;
-                        if (sparkA > 0.05) {
-                            const sparks = 6;
-                            for (let i = 0; i < sparks; i++) {
-                                const a = (i / sparks) * Math.PI * 2 + elapsed * 0.012;
-                                const sR = (gapMin + 4) * (0.4 + 0.5 * Math.sin(elapsed * 0.02 + i));
-                                g.beginFill(0xffffff, sparkA);
-                                g.drawCircle(sx + Math.cos(a) * sR, sy + Math.sin(a) * sR, 2.2);
-                                g.endFill();
-                            }
-                        }
-
-                        // Compression flash at the very end of the wind-up
-                        if (progress > WIND_END) {
-                            const flashLocal = (progress - WIND_END) / (FLASH_END - WIND_END);
-                            const flashA = 1 - flashLocal;
-                            g.beginFill(0xffffff, flashA * 0.95);
-                            g.drawCircle(sx, sy, 16 + flashLocal * 14);
-                            g.endFill();
-                            g.beginFill(tierColor, flashA * 0.75);
-                            g.drawCircle(sx, sy, 28 + flashLocal * 22);
-                            g.endFill();
-                        }
-                    } else {
-                        // ── Release: outward shockwave + cardinal cracks ─
-                        const releaseT = (progress - FLASH_END) / (1.0 - FLASH_END);
-                        const waveR = r * (0.4 + releaseT * 0.85);
-                        const ringAlpha = alpha * (1.0 - releaseT * 0.5);
-                        // Chunky double-ring shockwave
-                        g.lineStyle(8, tierColor, ringAlpha * 0.85);
-                        g.drawCircle(sx, sy, waveR);
-                        g.lineStyle(4, 0xffffff, ringAlpha * 0.95);
-                        g.drawCircle(sx, sy, waveR * 0.92);
+                    // ── Aftermath shockwave from slam point ────────────
+                    if (progress >= THRUST_END) {
+                        const aftT = (progress - THRUST_END) / (1.0 - THRUST_END);
+                        const waveR = 30 + aftT * 60;
+                        const ringA = alpha * (1.0 - aftT) * 0.85;
+                        const slamX = sx + dirX * REACH;
+                        const slamY = sy + dirY * REACH;
+                        g.lineStyle(6, tierColor, ringA);
+                        g.drawCircle(slamX, slamY, waveR);
+                        g.lineStyle(3, 0xffffff, ringA);
+                        g.drawCircle(slamX, slamY, waveR * 0.93);
                         g.lineStyle(0);
-                        // Faint translucent dust fill behind the front
-                        g.beginFill(tierColor, alpha * 0.12 * (1.0 - releaseT));
-                        g.drawCircle(sx, sy, waveR * 0.88);
-                        g.endFill();
-                        // Cardinal slam cracks radiating outward — same
-                        // four directions as a shield-bash impact would
-                        // produce on the ground.
-                        g.lineStyle(3, tierColor, ringAlpha * 0.8);
-                        for (let b = 0; b < 4; b++) {
-                            const a = b * (Math.PI / 2);
-                            g.moveTo(sx + Math.cos(a) * waveR * 0.2, sy + Math.sin(a) * waveR * 0.2);
-                            g.lineTo(sx + Math.cos(a) * waveR * 1.05, sy + Math.sin(a) * waveR * 1.05);
-                        }
-                        g.lineStyle(0);
-                        // Stun sparkles riding the shockwave front
-                        const sparks = 10;
-                        for (let i = 0; i < sparks; i++) {
-                            const a = (i / sparks) * Math.PI * 2 + elapsed * 0.004;
-                            const sd = waveR * (0.92 + 0.08 * Math.sin(elapsed * 0.01 + i));
-                            g.beginFill(0xffffff, ringAlpha * 0.9);
-                            g.drawCircle(sx + Math.cos(a) * sd, sy + Math.sin(a) * sd, 2.5);
-                            g.endFill();
-                        }
                     }
                     break;
                 }
@@ -2461,12 +2523,18 @@ export class GameRenderer {
                     const dirX = dx / dist, dirY = dy / dist;
                     const perpX = -dirY, perpY = dirX;
 
-                    // ── 1. Dash spine — wide tier aura → bright core ────────
-                    g.lineStyle(24, tierColor, alpha * 0.18);
+                    // ── 1. Dash spine — soft tier aura, slim core ──────────
+                    // Toned down significantly so the slashes/blades are
+                    // the visual focus, not a wall of colour. Thin black
+                    // outline added behind the white core for contrast on
+                    // bright tile backgrounds.
+                    g.lineStyle(20, tierColor, alpha * 0.10);
                     g.moveTo(sx, sy); g.lineTo(tx, ty);
-                    g.lineStyle(14, tierColor, alpha * 0.42);
+                    g.lineStyle(10, tierColor, alpha * 0.25);
                     g.moveTo(sx, sy); g.lineTo(tx, ty);
-                    g.lineStyle(6, 0xffffff, alpha * 0.88);
+                    g.lineStyle(5, 0x000000, alpha * 0.55);
+                    g.moveTo(sx, sy); g.lineTo(tx, ty);
+                    g.lineStyle(3, 0xffffff, alpha * 0.75);
                     g.moveTo(sx, sy); g.lineTo(tx, ty);
                     g.lineStyle(0);
 
@@ -2480,10 +2548,10 @@ export class GameRenderer {
                     //   • pops in late, peaks mid-life, shrinks at the end
                     // Count scales with dash distance so 3-tile and 5-tile
                     // dashes both feel proportionally dense.
-                    const bladeCount = Math.max(18, Math.floor(dist / 11));
-                    const ORBIT_AMP = 44;     // perpendicular orbit reach (px)
-                    const ORBIT_SPEED = 0.020; // radians/ms
-                    const SPIN_SPEED = 0.030;  // radians/ms
+                    const bladeCount = Math.max(14, Math.floor(dist / 14));
+                    const ORBIT_AMP = 44;       // perpendicular orbit reach (px)
+                    const ORBIT_SPEED = 0.011;  // radians/ms — was 0.020 (slowed)
+                    const SPIN_SPEED = 0.016;   // radians/ms — was 0.030 (slowed)
                     for (let i = 0; i < bladeCount; i++) {
                         const t = (i + 0.5) / bladeCount;
                         // Stagger appearance along the path so the vortex
@@ -2512,9 +2580,10 @@ export class GameRenderer {
                         const spin = elapsed * SPIN_SPEED + i * 0.4;
                         const cs = Math.cos(spin), sn = Math.sin(spin);
 
-                        // Outer tier-coloured glow blade
+                        // Outer tier-coloured glow blade — toned alpha so the
+                        // sword silhouettes elsewhere read as primary.
                         const gLen = 22 * bScale, gWid = 7 * bScale;
-                        g.beginFill(tierColor, alpha * 0.45 * bScale);
+                        g.beginFill(tierColor, alpha * 0.32 * bScale);
                         g.drawPolygon([
                             bx + gLen * cs,  by + gLen * sn,
                             bx - gWid * sn,  by + gWid * cs,
@@ -2523,9 +2592,20 @@ export class GameRenderer {
                         ]);
                         g.endFill();
 
-                        // Inner white-hot blade core
+                        // Thin black outline around the blade core — gives
+                        // each spinning blade a crisp silhouette against
+                        // the tier-coloured aura and busy tile bg.
                         const cLen = 16 * bScale, cWid = 4 * bScale;
-                        g.beginFill(0xffffff, alpha * 0.95 * bScale);
+                        g.lineStyle(1, 0x000000, alpha * 0.7 * bScale);
+                        g.drawPolygon([
+                            bx + cLen * cs,  by + cLen * sn,
+                            bx - cWid * sn,  by + cWid * cs,
+                            bx - cLen * cs,  by - cLen * sn,
+                            bx + cWid * sn,  by - cWid * cs
+                        ]);
+                        g.lineStyle(0);
+                        // Inner white-hot blade core
+                        g.beginFill(0xffffff, alpha * 0.85 * bScale);
                         g.drawPolygon([
                             bx + cLen * cs,  by + cLen * sn,
                             bx - cWid * sn,  by + cWid * cs,
@@ -2534,39 +2614,138 @@ export class GameRenderer {
                         ]);
                         g.endFill();
 
-                        // Motion-trail line behind the blade tip
-                        // (along negative dash dir so blades feel "left
-                        // behind" by the ninja as they pass through).
+                        // Motion-trail line behind the blade tip — toned
+                        // down so 14 of them don't merge into a streak.
                         const trailLen = 14 * bScale;
-                        g.lineStyle(2, tierColor, alpha * 0.7 * bScale);
+                        g.lineStyle(2, tierColor, alpha * 0.45 * bScale);
                         g.moveTo(bx + cLen * cs, by + cLen * sn);
                         g.lineTo(bx + cLen * cs - dirX * trailLen,
                                  by + cLen * sn - dirY * trailLen);
                         g.lineStyle(0);
                     }
 
-                    // ── 3. Cleave strokes — broad slash arcs at intervals ───
-                    // These read as "cuts" rather than orbiting blades. Big
-                    // perpendicular sabre-arcs that pop in along the path.
-                    const slashCount = Math.max(4, Math.floor(dist / 28));
+                    // ── 3. Katana slashes — sword silhouette + crescent arc ─
+                    // For each slash position along the path, a sword
+                    // visibly swings through an arc, leaving a fading
+                    // crescent trail behind. Reads as a slashing cut, not
+                    // a static lightning bolt. Adjacent slashes alternate
+                    // swing direction so the cuts feel like a flurry, not
+                    // a metronome.
+                    const slashCount = Math.max(3, Math.floor(dist / 40));
+                    const SLASH_DUR = 0.50;        // fraction of fx life — was 0.32 (slowed)
+                    const SWEEP_SPAN = Math.PI * 0.95; // ~170° arc per swing
+                    const SWORD_REACH = 56;
+                    const perpAngle = Math.atan2(perpY, perpX);
                     for (let i = 0; i < slashCount; i++) {
                         const t = (i + 0.5) / slashCount;
-                        const sappear = t * 0.55;
-                        if (progress < sappear) continue;
-                        const slife = (progress - sappear) / Math.max(0.001, 1 - sappear);
-                        const sa = alpha * (1 - slife * 0.7);
+                        const sStart = t * 0.55; // stagger by path position
+                        if (progress < sStart) continue;
+                        const sLifeRaw = (progress - sStart) / SLASH_DUR;
+                        if (sLifeRaw > 1.4) continue; // afterglow window
                         const cx = sx + dx * t;
                         const cy = sy + dy * t;
-                        const reach = 46 * (1 + slife * 0.25);
-                        const ax = cx + perpX * reach;
-                        const ay = cy + perpY * reach;
-                        const bx2 = cx - perpX * reach;
-                        const by2 = cy - perpY * reach;
-                        g.lineStyle(7, tierColor, sa * 0.6);
-                        g.moveTo(ax, ay); g.lineTo(bx2, by2);
-                        g.lineStyle(3, 0xffffff, sa * 0.95);
-                        g.moveTo(ax, ay); g.lineTo(bx2, by2);
+
+                        // Alternate swing direction per slash.
+                        const dir = (i & 1) ? 1 : -1;
+                        const sweepStart = perpAngle - dir * SWEEP_SPAN / 2;
+                        const sweepEnd = perpAngle + dir * SWEEP_SPAN / 2;
+
+                        // Ease-in-out so the swing is fast through the middle
+                        // (where the actual cut happens) and slow at the
+                        // start/finish — feels like a real katana motion.
+                        const sLife = Math.min(1, sLifeRaw);
+                        const eased = sLife < 0.5
+                                ? 2 * sLife * sLife
+                                : 1 - Math.pow(-2 * sLife + 2, 2) / 2;
+                        const currentAngle = sweepStart + (sweepEnd - sweepStart) * eased;
+
+                        // Fade: full alpha during swing, decay through afterglow.
+                        const fadeA = (sLifeRaw <= 1)
+                                ? alpha
+                                : alpha * Math.max(0, 1 - (sLifeRaw - 1) / 0.4);
+
+                        // ── Crescent motion trail (multi-segment polyline)
+                        // Sample 14 points along the swept arc from start
+                        // to currentAngle. Older segments thinner and fainter
+                        // so the leading edge POPS. Toned alpha so multiple
+                        // overlapping slashes don't blur together.
+                        const arcSegs = 14;
+                        for (let s = 0; s < arcSegs; s++) {
+                            const segT0 = s / arcSegs;
+                            const segT1 = (s + 1) / arcSegs;
+                            const a0 = sweepStart + (currentAngle - sweepStart) * segT0;
+                            const a1 = sweepStart + (currentAngle - sweepStart) * segT1;
+                            const x0 = cx + Math.cos(a0) * SWORD_REACH;
+                            const y0 = cy + Math.sin(a0) * SWORD_REACH;
+                            const x1 = cx + Math.cos(a1) * SWORD_REACH;
+                            const y1 = cy + Math.sin(a1) * SWORD_REACH;
+                            const lead = segT1;
+                            const segA = fadeA * Math.pow(lead, 1.4);
+                            g.lineStyle(2 + 5 * lead, tierColor, segA * 0.40);
+                            g.moveTo(x0, y0); g.lineTo(x1, y1);
+                            g.lineStyle(1 + 3 * lead, 0xffffff, segA * 0.75);
+                            g.moveTo(x0, y0); g.lineTo(x1, y1);
+                        }
                         g.lineStyle(0);
+
+                        // ── Sword silhouette at current angle (only during
+                        // active swing — no body during afterglow, just the
+                        // crescent fading.)
+                        if (sLifeRaw <= 1.0) {
+                            const tipX = cx + Math.cos(currentAngle) * SWORD_REACH;
+                            const tipY = cy + Math.sin(currentAngle) * SWORD_REACH;
+                            // Hilt sits a small distance from the pivot — keeps
+                            // the blade from intersecting the dash spine and
+                            // gives a sense of "sword in hand".
+                            const hiltDist = 4;
+                            const hiltX = cx + Math.cos(currentAngle) * hiltDist;
+                            const hiltY = cy + Math.sin(currentAngle) * hiltDist;
+                            const midX = (tipX + hiltX) * 0.5;
+                            const midY = (tipY + hiltY) * 0.5;
+                            // Blade-perpendicular axis for the lens shape.
+                            const bnx = -Math.sin(currentAngle);
+                            const bny = Math.cos(currentAngle);
+                            const bladeWid = 5;
+
+                            // Outer tier-coloured glow blade (slightly bigger)
+                            g.beginFill(tierColor, fadeA * 0.40);
+                            g.drawPolygon([
+                                tipX, tipY,
+                                midX + bnx * (bladeWid + 2), midY + bny * (bladeWid + 2),
+                                hiltX, hiltY,
+                                midX - bnx * (bladeWid + 2), midY - bny * (bladeWid + 2)
+                            ]);
+                            g.endFill();
+                            // Thin black silhouette outline so the sword
+                            // shape reads cleanly against the tier glow
+                            // and tile background.
+                            g.lineStyle(1, 0x000000, fadeA * 0.85);
+                            g.drawPolygon([
+                                tipX, tipY,
+                                midX + bnx * bladeWid, midY + bny * bladeWid,
+                                hiltX, hiltY,
+                                midX - bnx * bladeWid, midY - bny * bladeWid
+                            ]);
+                            g.lineStyle(0);
+                            // Steel core (silver-white, gives the sword its body)
+                            g.beginFill(0xe8e8f0, fadeA * 0.92);
+                            g.drawPolygon([
+                                tipX, tipY,
+                                midX + bnx * bladeWid, midY + bny * bladeWid,
+                                hiltX, hiltY,
+                                midX - bnx * bladeWid, midY - bny * bladeWid
+                            ]);
+                            g.endFill();
+                            // Bright cutting-edge dot at the tip
+                            g.beginFill(0xffffff, fadeA);
+                            g.drawCircle(tipX, tipY, 3);
+                            g.endFill();
+                            // Hilt ball — small dark circle so the sword
+                            // visually has a handle, not just a floating blade.
+                            g.beginFill(0x2a1810, fadeA * 0.9);
+                            g.drawCircle(hiltX, hiltY, 2.5);
+                            g.endFill();
+                        }
                     }
 
                     // ── 4. Vanish puff at start ─────────────────────────────

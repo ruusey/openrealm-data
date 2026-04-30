@@ -226,10 +226,18 @@ public class PlayerDataService {
         PlayerAccountEntity accountEntity = this.playerAccountRepository.findByAccountUuid(accountUuid);
         if (accountEntity == null)
             throw new Exception("Account with with UUID " + accountUuid + " does not exist");
-        // Check demo account character limit
+        // Check demo account character limit. Count only LIVE characters
+        // (deleted == null) — soft-deleted entries stay in the list with
+        // a deletion timestamp so the leaderboard / graveyard can still
+        // reference them. Without this filter, dead characters consumed
+        // slots and accounts hit the cap with only a handful of alive
+        // characters visible in the UI.
         final boolean isDemoAccount = this.isAccountDemo(accountUuid);
         final int charLimit = isDemoAccount ? MAX_CHARACTERS_DEMO : MAX_CHARACTERS;
-        if (accountEntity.getCharacters() != null && accountEntity.getCharacters().size() >= charLimit)
+        final long aliveCount = accountEntity.getCharacters() == null ? 0L
+                : accountEntity.getCharacters().stream()
+                        .filter(c -> c != null && c.getDeleted() == null).count();
+        if (aliveCount >= charLimit)
             throw new Exception("Character limit reached (" + charLimit + " max)");
         final CharacterEntity character = CharacterEntity.builder().characterUuid(PlayerDataService.randomUuid())
                 .characterClass(classId).build();

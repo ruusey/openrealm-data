@@ -6053,12 +6053,12 @@
 		"col": 10,
 		"spriteKey": "openrealm-items.png",
 		"name": "Iron Shuriken",
-		"description": "A simple iron throwing star — focuses the ninja's chi for a flickering blade-fury dash.",
+		"description": "A simple iron throwing star \u00e2\u20ac\u201d focuses the ninja's chi for a flickering blade-fury dash.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 70
 		},
 		"consumable": false,
@@ -6068,8 +6068,8 @@
 		"fameBonus": 0,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 60,
-			"max": 90
+			"min": 120,
+			"max": 180
 		}
 	},
 	{
@@ -6078,12 +6078,12 @@
 		"col": 11,
 		"spriteKey": "openrealm-items.png",
 		"name": "Steel Shuriken",
-		"description": "Hardened steel — the dash carves a longer trail of cuts.",
+		"description": "Hardened steel \u00e2\u20ac\u201d the dash carves a longer trail of cuts.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 75
 		},
 		"consumable": false,
@@ -6093,8 +6093,8 @@
 		"fameBonus": 1,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 90,
-			"max": 120
+			"min": 180,
+			"max": 240
 		}
 	},
 	{
@@ -6103,12 +6103,12 @@
 		"col": 12,
 		"spriteKey": "openrealm-items.png",
 		"name": "Silver Shuriken",
-		"description": "A polished silver star — sharper bite, faster spin.",
+		"description": "A polished silver star \u00e2\u20ac\u201d sharper bite, faster spin.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 80
 		},
 		"consumable": false,
@@ -6118,8 +6118,8 @@
 		"fameBonus": 1,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 120,
-			"max": 150
+			"min": 240,
+			"max": 300
 		}
 	},
 	{
@@ -6128,12 +6128,12 @@
 		"col": 13,
 		"spriteKey": "openrealm-items.png",
 		"name": "Crimson Shuriken",
-		"description": "Crimson-edged throwing star — leaves a wake of bleeding wounds.",
+		"description": "Crimson-edged throwing star \u00e2\u20ac\u201d leaves a wake of bleeding wounds.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 85
 		},
 		"consumable": false,
@@ -6143,8 +6143,8 @@
 		"fameBonus": 2,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 150,
-			"max": 185
+			"min": 300,
+			"max": 370
 		}
 	},
 	{
@@ -6153,12 +6153,12 @@
 		"col": 14,
 		"spriteKey": "openrealm-items.png",
 		"name": "Obsidian Shuriken",
-		"description": "Volcanic obsidian — the blades glow as the ninja dashes.",
+		"description": "Volcanic obsidian \u00e2\u20ac\u201d the blades glow as the ninja dashes.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 90
 		},
 		"consumable": false,
@@ -6168,8 +6168,8 @@
 		"fameBonus": 2,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 180,
-			"max": 220
+			"min": 360,
+			"max": 440
 		}
 	},
 	{
@@ -6178,12 +6178,12 @@
 		"col": 15,
 		"spriteKey": "openrealm-items.png",
 		"name": "Demonbane Shuriken",
-		"description": "Forged in temple flame — cuts through demon and mortal alike.",
+		"description": "Forged in temple flame \u00e2\u20ac\u201d cuts through demon and mortal alike.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 95
 		},
 		"consumable": false,
@@ -6193,8 +6193,8 @@
 		"fameBonus": 3,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 215,
-			"max": 255
+			"min": 430,
+			"max": 510
 		}
 	},
 	{
@@ -6203,12 +6203,12 @@
 		"col": 16,
 		"spriteKey": "openrealm-items.png",
 		"name": "Shogun's Star",
-		"description": "Heirloom of the shadow shogun — a dash of unmatched fury.",
+		"description": "Heirloom of the shadow shogun \u00e2\u20ac\u201d a dash of unmatched fury.",
 		"effect": {
 			"self": false,
 			"effectId": 8,
 			"duration": 350,
-			"cooldownDuration": 1500,
+			"cooldownDuration": 750,
 			"mpCost": 100
 		},
 		"consumable": false,
@@ -6218,8 +6218,8 @@
 		"fameBonus": 5,
 		"damage": {
 			"projectileGroupId": -1,
-			"min": 250,
-			"max": 290
+			"min": 500,
+			"max": 580
 		}
 	}
 ]
