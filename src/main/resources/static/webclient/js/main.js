@@ -987,9 +987,15 @@ document.getElementById('delete-char-btn').addEventListener('click', async () =>
 document.getElementById('create-char-btn').addEventListener('click', async () => {
     if (selectedClassId === null) return;
     const errorEl = document.getElementById('char-error');
-    const charCount = account.characters ? account.characters.length : 0;
-    if (charCount >= 20) {
-        errorEl.textContent = 'Character limit reached (20 max).';
+    // Count only LIVE characters (no `deleted` timestamp). Soft-deleted
+    // chars stay on the account for graveyard/leaderboard purposes — they
+    // must NOT eat slots. Cap matches PlayerDataService.MAX_CHARACTERS.
+    const aliveCount = account.characters
+            ? account.characters.filter(c => c && !c.deleted).length
+            : 0;
+    const MAX_ALIVE = 15;
+    if (aliveCount >= MAX_ALIVE) {
+        errorEl.textContent = `Character limit reached (${MAX_ALIVE} max alive).`;
         return;
     }
     const btn = document.getElementById('create-char-btn');
