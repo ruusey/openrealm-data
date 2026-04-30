@@ -2175,36 +2175,34 @@ export class GameRenderer {
                 }
 
                 case 11: { // KNIGHT_SHOCKWAVE — forward thrust shield bash
-                    // Conveys "knight winds up behind, then THRUSTS the
-                    // shield FORWARD with the stun". Force chevrons start
-                    // crouched behind the knight, then sweep forward
-                    // through them and beyond, ending in a heavy slam at
-                    // the front. Direction comes from the line-effect's
-                    // start (knight) → target (cursor) so the visual
-                    // tracks the projectile direction exactly.
-                    //
-                    // Phases:
-                    //   0.00–0.30 — wind-up: chevrons gathered behind
-                    //   0.30–0.70 — thrust: chevrons sweep forward through
-                    //   0.70–0.85 — slam impact at the front
-                    //   0.85–1.00 — fading aftermath shockwave
+                    // Conveys "knight winds up briefly, then THRUSTS the
+                    // shield FORWARD with the stun". Phases compressed so
+                    // the slam lands roughly when the projectiles do —
+                    // earlier versions had the impact arrive long after
+                    // the projectiles already hit. REACH is now the
+                    // ACTUAL distance to the cursor (capped) so the
+                    // animation finishes where the shield projectiles
+                    // land rather than at a fixed offset.
 
                     const _ts11 = this.worldToScreen(fx.targetX, fx.targetY, gameState);
                     const tx11 = _ts11.x, ty11 = _ts11.y;
                     let kdx = tx11 - sx, kdy = ty11 - sy;
                     const kdist = Math.sqrt(kdx * kdx + kdy * kdy);
-                    // If start == target (no aim direction), fall back to
-                    // facing right so the visual still has an axis.
                     const dirX = kdist > 0.5 ? kdx / kdist : 1;
                     const dirY = kdist > 0.5 ? kdy / kdist : 0;
                     const perpX = -dirY, perpY = dirX;
 
-                    // Forward reach in screen pixels — how far the thrust
-                    // extends in front of the knight at peak.
-                    const REACH = 130;
-                    const WINDUP_END = 0.30;
-                    const THRUST_END = 0.70;
-                    const SLAM_END = 0.85;
+                    // Reach the actual cursor distance, clamped to a
+                    // sane minimum + maximum so cursor-on-knight clicks
+                    // and far-cursor stretches both look sensible.
+                    const REACH = Math.max(60, Math.min(280, kdist));
+                    // Compressed phase timings — total fx duration is
+                    // 600ms (down from 900ms) and the slam lands at 50%
+                    // (~300ms) so it matches the visible projectile
+                    // arrival roughly.
+                    const WINDUP_END = 0.12;
+                    const THRUST_END = 0.50;
+                    const SLAM_END = 0.70;
 
                     // ── Ground-shadow streak along the thrust axis ──────
                     // Faint dark band on the ground from the knight to the

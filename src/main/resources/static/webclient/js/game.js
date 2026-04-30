@@ -1167,7 +1167,18 @@ export class GameState {
 
             if (Math.abs(p.dx) > 0.1) p.facing = p.dx > 0 ? 'right' : 'left';
             p.animTimer = (p.animTimer || 0) + dt;
-            if (p.animTimer > 0.125) { p.animTimer = 0; p.animFrame = ((p.animFrame || 0) + 1) % 2; }
+            // Frame interval scales with current movement speed so a fast
+            // peer's walk cycle visibly outpaces a slow one's. Was a fixed
+            // 125 ms per frame; now 60 ms (sprinting) → 200 ms (slow walk
+            // / standing). Idle entities (dx≈dy≈0) stay on the first frame
+            // via the upstream attack/idle anim selection, so this only
+            // affects walking players.
+            const pace = Math.max(0.1, Math.sqrt(p.dx * p.dx + p.dy * p.dy));
+            const frameThreshold = Math.max(0.06, Math.min(0.2, 0.18 / pace));
+            if (p.animTimer > frameThreshold) {
+                p.animTimer = 0;
+                p.animFrame = ((p.animFrame || 0) + 1) % 2;
+            }
         }
 
         // Enemies: extrapolate by velocity, then lerp to correct.

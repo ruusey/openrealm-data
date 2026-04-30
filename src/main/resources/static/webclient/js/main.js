@@ -2777,38 +2777,124 @@ function renderTransitionSprite() {
     if (!canvas || !renderer) return;
     const ctx = canvas.getContext('2d');
 
-    // Load animation frames on first call
+    // Load animation frames on first call. Frames are stored as
+    // {row, col} pairs so we can recolor on the fly with the local
+    // player's dye — pre-rendering data URLs once would freeze the
+    // dye to whatever was set at first call.
     if (!_transitionSpriteFrames) {
         const animKey = `player:${game.transitionClassId}`;
         const animDef = game.animations?.[animKey];
         if (!animDef) return;
         const walkAnim = animDef.animations['walk_front'] || animDef.animations['walk_side'];
         if (!walkAnim) return;
-        _transitionSpriteFrames = walkAnim.frames.map(f => {
-            const url = renderer.getSpriteDataUrl(
-                animDef.spriteKey.replace('.png', '') + '.png',
-                f.col, f.row, animDef.spriteSize || 8, animDef.spriteHeight || 0);
-            return url;
-        }).filter(Boolean);
+        _transitionSpriteFrames = walkAnim.frames.map(f => ({ row: f.row, col: f.col }));
+        _transitionSpriteAnimDef = animDef;
         if (_transitionSpriteFrames.length === 0) { _transitionSpriteFrames = null; return; }
     }
 
-    // Advance animation (swap frames every 300ms)
+    // Frame-advance pace scales with the local player's movement speed
+    // stat so a fast Ninja's transition sprite walks faster than a slow
+    // Knight's. Falls back to a reasonable default (~120ms / frame)
+    // when the stat isn't available yet during early transition.
+    const localStats = (game.players && game.playerId != null)
+            ? game.players.get(game.playerId)?.stats : null;
+    // SPD typically ranges 7..75; map to a frame interval of
+    // 200ms (slow) → 60ms (fast). Result roughly matches the in-game
+    // walking cadence for that class.
+    const spd = (localStats && typeof localStats.spd === 'number') ? localStats.spd : 30;
+    const FRAME_MS = Math.max(60, 240 - spd * 2.4);
+    const FRAME_TICKS = Math.max(3, Math.round(FRAME_MS / 16.67));
     _transitionAnimTimer++;
-    if (_transitionAnimTimer >= 18) { // ~300ms at 60fps
+    if (_transitionAnimTimer >= FRAME_TICKS) {
         _transitionAnimTimer = 0;
         _transitionAnimFrame = (_transitionAnimFrame + 1) % _transitionSpriteFrames.length;
     }
 
-    const url = _transitionSpriteFrames[_transitionAnimFrame];
-    if (!url) return;
+    const frame = _transitionSpriteFrames[_transitionAnimFrame];
+    const animDef = _transitionSpriteAnimDef;
+    if (!frame || !animDef) return;
 
-    // Draw sprite centered on canvas
-    const img = new Image();
-    img.src = url;
+    // Resolve player dye. Local player's dye id is stored on game.dyeId
+    // (set when own UpdatePacket arrives) — fall back to the player
+    // record if for any reason it hasn't been pushed yet.
+    const dyeId = game.dyeId
+            || game.players?.get?.(game.playerId)?.dyeId
+            || 0;
+
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, 64, 64);
-    ctx.drawImage(img, 0, 0, 64, 64);
+    _drawDyedFrameToCanvas(ctx, animDef, game.transitionClassId, frame, dyeId, 64);
+}
+let _transitionSpriteAnimDef = null;
+
+// Draw a dyed sprite frame to a 2D canvas (for transition + char-select).
+// Mirrors the in-game renderer's getDyedRegion logic at 1:1 scale, then
+// upscales into the destination. dyeId=0 / no mask falls back to a raw blit.
+function _drawDyedFrameToCanvas(ctx, animDef, classId, frame, dyeId, destSize) {
+    try {
+        const sheetKey = animDef.spriteKey.replace('.png', '');
+        const img = _charSpriteSheets[sheetKey];
+        const SPRITE_W = animDef.spriteSize || 8;
+        const SPRITE_H = animDef.spriteHeight || SPRITE_W;
+        if (!img) return;
+        const dye = (dyeId && dyeId > 0 && game.dyeAssets) ? game.dyeAssets[dyeId] : null;
+        const maskFrame = (dye && game.classMaskFrameIndex)
+                ? game.classMaskFrameIndex[`${classId}:${frame.row}:${frame.col}`] : null;
+        if (!dye || !maskFrame || !maskFrame.mask) {
+            ctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H,
+                    SPRITE_W, SPRITE_H, 0, 0, destSize, destSize);
+            return;
+        }
+        if (!_dyedIconCache) _dyedIconCache = {};
+        const cacheKey = `${classId}:${frame.row}:${frame.col}:${dyeId}`;
+        let dyedCanvas = _dyedIconCache[cacheKey];
+        if (!dyedCanvas) {
+            dyedCanvas = document.createElement('canvas');
+            dyedCanvas.width = SPRITE_W; dyedCanvas.height = SPRITE_H;
+            const dctx = dyedCanvas.getContext('2d');
+            dctx.imageSmoothingEnabled = false;
+            try {
+                dctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H,
+                        SPRITE_W, SPRITE_H, 0, 0, SPRITE_W, SPRITE_H);
+            } catch (e) {
+                ctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H,
+                        SPRITE_W, SPRITE_H, 0, 0, destSize, destSize);
+                return;
+            }
+            let imgData;
+            try { imgData = dctx.getImageData(0, 0, SPRITE_W, SPRITE_H); }
+            catch (e) {
+                ctx.drawImage(img, frame.col * SPRITE_W, frame.row * SPRITE_H,
+                        SPRITE_W, SPRITE_H, 0, 0, destSize, destSize);
+                return;
+            }
+            const px = imgData.data;
+            if (dye.type === 'solid') {
+                const dr = (dye.color >> 16) & 0xff;
+                const dg = (dye.color >> 8) & 0xff;
+                const db = dye.color & 0xff;
+                for (let y = 0; y < SPRITE_H; y++) {
+                    const maskRow = maskFrame.mask[y];
+                    if (!maskRow) continue;
+                    for (let x = 0; x < SPRITE_W; x++) {
+                        if (!maskRow[x]) continue;
+                        const i = (y * SPRITE_W + x) * 4;
+                        if (px[i + 3] === 0) continue;
+                        const lum = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+                        const scale = lum / 128;
+                        px[i]     = Math.min(255, Math.max(0, dr * scale));
+                        px[i + 1] = Math.min(255, Math.max(0, dg * scale));
+                        px[i + 2] = Math.min(255, Math.max(0, db * scale));
+                    }
+                }
+                dctx.putImageData(imgData, 0, 0);
+            }
+            _dyedIconCache[cacheKey] = dyedCanvas;
+        }
+        ctx.drawImage(dyedCanvas, 0, 0, SPRITE_W, SPRITE_H, 0, 0, destSize, destSize);
+    } catch (err) {
+        console.warn('[drawDyedFrame] failed', classId, dyeId, err);
+    }
 }
 
 // Consumable potion display
