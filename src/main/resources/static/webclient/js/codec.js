@@ -375,7 +375,8 @@ export const PacketReaders = {
             posX: r.readFloat(), posY: r.readFloat(),
             radius: r.readFloat(),
             duration: r.readShort(),
-            targetPosX: r.readFloat(), targetPosY: r.readFloat()
+            targetPosX: r.readFloat(), targetPosY: r.readFloat(),
+            tier: r.readByte()
         };
     },
     [PacketId.PLAYER_SHOOT](r) {

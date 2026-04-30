@@ -1500,6 +1500,12 @@ export class GameRenderer {
         if (!gameState.visualEffects || gameState.visualEffects.length === 0) return;
         const now = Date.now();
 
+        // Tier-color palette: T0 white → T6 purple. Used by tiered ability
+        // effects (priest heal, necro skull, scepter lightning, poison,
+        // trap, plus the four class-cast visuals) so a teammate's loot tier
+        // is readable from across the screen.
+        const TIER_COLORS = GameRenderer.TIER_COLORS;
+
         for (const fx of gameState.visualEffects) {
             const elapsed = now - fx.startTime;
             const progress = Math.min(elapsed / fx.duration, 1.0);
@@ -1508,25 +1514,85 @@ export class GameRenderer {
             const sx = screen.x;
             const sy = screen.y;
             const r = fx.radius * SCALE;
+            const tier = Math.max(0, Math.min(6, fx.tier | 0));
+            const tierColor = TIER_COLORS[tier];
 
             switch (fx.type) {
-                case 0: // HEAL_RADIUS — expanding green ring with shimmer
-                    g.lineStyle(2, 0x40ff40, alpha * 0.7);
-                    g.drawCircle(sx, sy, r * (0.5 + progress * 0.5));
+                case 0: { // HEAL_RADIUS — full-throated priest tome blast
+                    // Expanding ring grows fast then settles, with a
+                    // tier-coloured outer halo so a T6 tome looks visibly
+                    // different from a T0. Multi-layer ring + filled body
+                    // + cross beams + shimmer particles + bright core.
+                    const ringR = r * (0.4 + progress * 0.6);
+                    // Soft outer halo in tier colour — biggest visual cue
+                    g.beginFill(tierColor, alpha * 0.18);
+                    g.drawCircle(sx, sy, ringR * 1.15);
+                    g.endFill();
+                    // Inner translucent green body — preserves the "heal" feel
+                    g.beginFill(0x60ff60, alpha * 0.22);
+                    g.drawCircle(sx, sy, ringR);
+                    g.endFill();
+                    // Three concentric rings: tier-coloured outer, bright
+                    // green mid, white inner. Read as a "shockwave of light".
+                    g.lineStyle(5, tierColor, alpha * 0.85);
+                    g.drawCircle(sx, sy, ringR);
+                    g.lineStyle(3, 0x80ff80, alpha * 0.95);
+                    g.drawCircle(sx, sy, ringR * 0.92);
+                    g.lineStyle(2, 0xffffff, alpha * 0.85);
+                    g.drawCircle(sx, sy, ringR * 0.82);
                     g.lineStyle(0);
-                    // Shimmer particles along ring
-                    for (let i = 0; i < 8; i++) {
-                        const a = (i / 8) * Math.PI * 2 + elapsed * 0.005;
-                        const pr = r * (0.5 + progress * 0.5);
-                        g.beginFill(0x80ff80, alpha * 0.5);
-                        g.drawCircle(sx + Math.cos(a) * pr, sy + Math.sin(a) * pr, 3);
+                    // Cross beams — cardinal sparkle lines pulsing outward
+                    const beamLen = ringR * 0.55;
+                    const beamAlpha = alpha * 0.6 * (0.5 + 0.5 * Math.sin(elapsed * 0.012));
+                    g.lineStyle(3, 0xffffff, beamAlpha);
+                    for (let b = 0; b < 4; b++) {
+                        const a = b * (Math.PI / 2) + elapsed * 0.003;
+                        g.moveTo(sx + Math.cos(a) * (ringR * 0.2), sy + Math.sin(a) * (ringR * 0.2));
+                        g.lineTo(sx + Math.cos(a) * (ringR * 0.2 + beamLen), sy + Math.sin(a) * (ringR * 0.2 + beamLen));
+                    }
+                    g.lineStyle(0);
+                    // Shimmer particles — 16 of them, rotating, with tier-
+                    // coloured halo + white core for that "magic sparkle"
+                    const particles = 16;
+                    for (let i = 0; i < particles; i++) {
+                        const a = (i / particles) * Math.PI * 2 + elapsed * 0.005;
+                        const pr = ringR * (0.85 + 0.1 * Math.sin(elapsed * 0.008 + i));
+                        const px = sx + Math.cos(a) * pr;
+                        const py = sy + Math.sin(a) * pr;
+                        g.beginFill(tierColor, alpha * 0.55);
+                        g.drawCircle(px, py, 6);
+                        g.endFill();
+                        g.beginFill(0xffffff, alpha * 0.95);
+                        g.drawCircle(px, py, 2.5);
                         g.endFill();
                     }
+                    // Rising sparks — 8 small dots that drift upward over
+                    // the duration, giving the effect vertical motion.
+                    for (let i = 0; i < 8; i++) {
+                        const seed = i * 0.7;
+                        const driftA = (seed * 1.3) % (Math.PI * 2);
+                        const lift = 24 + 60 * progress + (i & 1) * 8;
+                        const sxi = sx + Math.cos(driftA) * (ringR * 0.4);
+                        const syi = sy + Math.sin(driftA) * (ringR * 0.2) - lift;
+                        g.beginFill(0xc0ffc0, alpha * 0.8);
+                        g.drawCircle(sxi, syi, 3);
+                        g.endFill();
+                    }
+                    // Bright pulsing core
+                    const corePulse = 0.6 + 0.4 * Math.sin(elapsed * 0.02);
+                    g.beginFill(0xffffff, alpha * 0.85 * corePulse);
+                    g.drawCircle(sx, sy, ringR * 0.16);
+                    g.endFill();
+                    g.beginFill(tierColor, alpha * 0.5 * corePulse);
+                    g.drawCircle(sx, sy, ringR * 0.28);
+                    g.endFill();
                     break;
+                }
 
                 case 1: { // VAMPIRISM — necromancer life-drain spiral
                     // Outer translucent boundary so the drain area is visible.
-                    g.lineStyle(3, 0x802080, alpha * 0.9);
+                    // Tier-coloured ring distinguishes T0..T6 skulls.
+                    g.lineStyle(3, tierColor, alpha * 0.9);
                     g.drawCircle(sx, sy, r);
                     g.beginFill(0x4a0a4a, alpha * 0.18);
                     g.drawCircle(sx, sy, r);
@@ -1636,8 +1702,8 @@ export class GameRenderer {
                         for (let i = 1; i <= segments; i++) g.lineTo(path[i][0], path[i][1]);
                     };
 
-                    // Layer 1 — wide outer aura (purple-blue plasma haze)
-                    drawPath(14, 0x4020a0, alpha * 0.25 * strike);
+                    // Layer 1 — wide outer aura (tier-coloured plasma haze)
+                    drawPath(14, tierColor, alpha * 0.32 * strike);
                     // Layer 2 — thick electric blue glow
                     drawPath(9, 0x2060ff, alpha * 0.45 * strike * flicker);
                     // Layer 3 — main bolt body (cyan-white)
@@ -1785,16 +1851,16 @@ export class GameRenderer {
                         // bubbles so it reads at a glance.
                         const expand = 0.4 + progress * 0.6;
                         const cloudR = r * expand;
-                        // Soft outer halo
-                        g.beginFill(0x408a30, alpha * 0.25);
+                        // Soft outer halo — tier-coloured for instant tier read
+                        g.beginFill(tierColor, alpha * 0.25);
                         g.drawCircle(sx, sy, cloudR * 1.1);
                         g.endFill();
                         // Main cloud body — saturated green fill
                         g.beginFill(0x4cc530, alpha * 0.4);
                         g.drawCircle(sx, sy, cloudR);
                         g.endFill();
-                        // Thick toxic-green border
-                        g.lineStyle(4, 0x60ff40, alpha * 0.9);
+                        // Thick tier-tinted border
+                        g.lineStyle(4, tierColor, alpha * 0.9);
                         g.drawCircle(sx, sy, cloudR);
                         g.lineStyle(2, 0xa0ff70, alpha * 0.7);
                         g.drawCircle(sx, sy, cloudR * 0.85);
@@ -1874,16 +1940,17 @@ export class GameRenderer {
                         const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.004);
                         const fadeAlpha = progress > 0.85 ? (1.0 - progress) / 0.15 : 1.0;
 
-                        // Outer ring
-                        g.lineStyle(3, 0xcc8833, fadeAlpha * pulse * 0.8);
+                        // Outer ring — tier-coloured (T0 silver → T6 purple)
+                        g.lineStyle(3, tierColor, fadeAlpha * pulse * 0.85);
                         g.drawCircle(sx, sy, r);
-                        // Inner ring
+                        // Inner ring (kept warm-amber so the trap still reads
+                        // as "armed" regardless of tier)
                         g.lineStyle(1, 0xffaa44, fadeAlpha * pulse * 0.5);
                         g.drawCircle(sx, sy, r * 0.75);
                         g.lineStyle(0);
 
-                        // Semi-transparent fill
-                        g.beginFill(0xcc6600, fadeAlpha * 0.1);
+                        // Semi-transparent fill — light tier-coloured wash
+                        g.beginFill(tierColor, fadeAlpha * 0.12);
                         g.drawCircle(sx, sy, r);
                         g.endFill();
 
@@ -1912,12 +1979,12 @@ export class GameRenderer {
                 case 7: { // TRAP_PLACED — persistent armed trap ring (same as case 6 AoE)
                     const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.004);
                     const fadeAlpha = progress > 0.85 ? (1.0 - progress) / 0.15 : 1.0;
-                    g.lineStyle(3, 0xcc8833, fadeAlpha * pulse * 0.8);
+                    g.lineStyle(3, tierColor, fadeAlpha * pulse * 0.85);
                     g.drawCircle(sx, sy, r);
                     g.lineStyle(1, 0xffaa44, fadeAlpha * pulse * 0.5);
                     g.drawCircle(sx, sy, r * 0.75);
                     g.lineStyle(0);
-                    g.beginFill(0xcc6600, fadeAlpha * 0.1);
+                    g.beginFill(tierColor, fadeAlpha * 0.12);
                     g.drawCircle(sx, sy, r);
                     g.endFill();
                     const teeth = 8;
@@ -1942,8 +2009,9 @@ export class GameRenderer {
                     // Circle rapidly closes inward then flashes
                     const closeR = r * (1.0 - progress);
                     const flashAlpha = progress < 0.3 ? 1.0 : Math.max(0, 1.0 - (progress - 0.3) / 0.7);
-                    // Closing amber ring
-                    g.lineStyle(4, 0xff8800, flashAlpha * 0.9);
+                    // Closing tier-coloured outer ring + warm amber inner —
+                    // tier reads even at the moment of detonation.
+                    g.lineStyle(4, tierColor, flashAlpha * 0.95);
                     g.drawCircle(sx, sy, closeR);
                     g.lineStyle(2, 0xffcc44, flashAlpha * 0.6);
                     g.drawCircle(sx, sy, closeR * 0.7);
@@ -1962,6 +2030,206 @@ export class GameRenderer {
                         g.drawCircle(sx + Math.cos(a) * pr, sy + Math.sin(a) * pr, 2);
                         g.endFill();
                     }
+                    break;
+                }
+
+                case 9: { // SMOKE_POOF — rogue cloak vanish
+                    // A puff of smoke at the caster, expanding and fading.
+                    // Tier tints the smoke so a T6 cloak feels distinct from
+                    // a T0 — but it stays smoky-grey at the core for the
+                    // unmistakable "vanish" read.
+                    const puffR = r * (0.6 + progress * 1.4);
+                    // Outer translucent puff cluster — 6 overlapping circles
+                    // with offsets that rotate slowly so it billows.
+                    for (let i = 0; i < 6; i++) {
+                        const a = (i / 6) * Math.PI * 2 + elapsed * 0.002;
+                        const dist = puffR * 0.45;
+                        const px = sx + Math.cos(a) * dist;
+                        const py = sy + Math.sin(a) * dist;
+                        const pr = puffR * (0.65 + 0.1 * Math.sin(elapsed * 0.01 + i));
+                        // Tier tint outer
+                        g.beginFill(tierColor, alpha * 0.18);
+                        g.drawCircle(px, py, pr);
+                        g.endFill();
+                        // Smoky grey core
+                        g.beginFill(0x808080, alpha * 0.32);
+                        g.drawCircle(px, py, pr * 0.78);
+                        g.endFill();
+                        // Inner dark wisp
+                        g.beginFill(0x404040, alpha * 0.4);
+                        g.drawCircle(px, py, pr * 0.45);
+                        g.endFill();
+                    }
+                    // Central bright flash at the start — the "POP" of the cast
+                    if (progress < 0.25) {
+                        const flashA = 1.0 - progress / 0.25;
+                        g.beginFill(0xffffff, flashA * 0.85);
+                        g.drawCircle(sx, sy, puffR * 0.35 * (1 + progress));
+                        g.endFill();
+                        g.beginFill(tierColor, flashA * 0.55);
+                        g.drawCircle(sx, sy, puffR * 0.55 * (1 + progress));
+                        g.endFill();
+                    }
+                    // Drifting wisps that float upward (the "smoke rising" feel)
+                    for (let i = 0; i < 8; i++) {
+                        const seed = i * 0.83;
+                        const driftA = (seed * 1.7) % (Math.PI * 2);
+                        const lift = 18 * progress * (1 + (i & 1));
+                        const wx = sx + Math.cos(driftA) * (puffR * 0.4) + (i - 4) * 3;
+                        const wy = sy + Math.sin(driftA) * (puffR * 0.2) - lift;
+                        g.beginFill(0xa0a0a0, alpha * 0.55);
+                        g.drawCircle(wx, wy, 4 - progress * 2);
+                        g.endFill();
+                    }
+                    break;
+                }
+
+                case 10: { // WIZARD_BURST — arcane release at cast
+                    // Tight glyph + radial spokes + sparkle ring. Reads as
+                    // "I am the caster, behold this spell" without competing
+                    // visually with the projectile.
+                    const burstR = r * (0.5 + progress * 0.6);
+                    // Filled magic-circle floor
+                    g.beginFill(tierColor, alpha * 0.18);
+                    g.drawCircle(sx, sy, burstR);
+                    g.endFill();
+                    // Two counter-rotating runic rings
+                    g.lineStyle(3, tierColor, alpha * 0.85);
+                    g.drawCircle(sx, sy, burstR);
+                    g.lineStyle(2, 0xffffff, alpha * 0.85);
+                    g.drawCircle(sx, sy, burstR * 0.78);
+                    g.lineStyle(0);
+                    // Six rune-points orbiting outward
+                    const runes = 6;
+                    for (let i = 0; i < runes; i++) {
+                        const a = (i / runes) * Math.PI * 2 + elapsed * 0.006;
+                        const px = sx + Math.cos(a) * burstR;
+                        const py = sy + Math.sin(a) * burstR;
+                        // Outer halo
+                        g.beginFill(tierColor, alpha * 0.55);
+                        g.drawCircle(px, py, 8);
+                        g.endFill();
+                        // Bright diamond core
+                        g.beginFill(0xffffff, alpha * 0.95);
+                        g.drawPolygon([px, py - 5, px + 4, py, px, py + 5, px - 4, py]);
+                        g.endFill();
+                    }
+                    // Radial spokes that fade as the burst expands
+                    const spokeA = alpha * (1.0 - progress * 0.7);
+                    g.lineStyle(2, 0xffffff, spokeA);
+                    for (let i = 0; i < 8; i++) {
+                        const a = (i / 8) * Math.PI * 2;
+                        const inner = burstR * 0.2;
+                        const outer = burstR * 0.95;
+                        g.moveTo(sx + Math.cos(a) * inner, sy + Math.sin(a) * inner);
+                        g.lineTo(sx + Math.cos(a) * outer, sy + Math.sin(a) * outer);
+                    }
+                    g.lineStyle(0);
+                    // Initial flash at cast moment
+                    if (progress < 0.2) {
+                        const flashA = 1.0 - progress / 0.2;
+                        g.beginFill(0xffffff, flashA * 0.85);
+                        g.drawCircle(sx, sy, burstR * 0.4);
+                        g.endFill();
+                    }
+                    // Bright pulsing core
+                    g.beginFill(tierColor, alpha * 0.75);
+                    g.drawCircle(sx, sy, burstR * 0.18);
+                    g.endFill();
+                    break;
+                }
+
+                case 11: { // KNIGHT_SHOCKWAVE — ground-slam shield bash
+                    // A flat ring expanding outward (NOT a vertical sphere)
+                    // gives the "ground impact" feel. Plus debris pebbles
+                    // and an initial impact flash at the player's feet.
+                    const waveR = r * progress;
+                    const ringAlpha = alpha * (1.0 - progress * 0.4);
+                    // Outer expanding shockwave — chunky double ring
+                    g.lineStyle(6, tierColor, ringAlpha * 0.75);
+                    g.drawCircle(sx, sy, waveR);
+                    g.lineStyle(3, 0xffffff, ringAlpha * 0.9);
+                    g.drawCircle(sx, sy, waveR * 0.9);
+                    g.lineStyle(0);
+                    // Translucent dust fill INSIDE the ring (only the moving
+                    // edge remains visible as the wave passes)
+                    g.beginFill(0xc0a060, alpha * 0.18 * (1.0 - progress));
+                    g.drawCircle(sx, sy, waveR * 0.85);
+                    g.endFill();
+                    // Initial impact flash at the player's feet
+                    if (progress < 0.25) {
+                        const flashA = 1.0 - progress / 0.25;
+                        g.beginFill(0xffffff, flashA * 0.95);
+                        g.drawCircle(sx, sy, 16 * (1 + progress * 2));
+                        g.endFill();
+                        g.beginFill(tierColor, flashA * 0.7);
+                        g.drawCircle(sx, sy, 26 * (1 + progress * 2));
+                        g.endFill();
+                    }
+                    // Debris pebbles flying outward along the wave front
+                    const pebbles = 10;
+                    for (let i = 0; i < pebbles; i++) {
+                        const a = (i / pebbles) * Math.PI * 2;
+                        const dist = waveR * (0.85 + 0.15 * Math.sin(elapsed * 0.006 + i));
+                        const px = sx + Math.cos(a) * dist;
+                        const py = sy + Math.sin(a) * dist;
+                        g.beginFill(0x665544, ringAlpha * 0.85);
+                        g.drawRect(px - 2, py - 2, 4, 4);
+                        g.endFill();
+                    }
+                    // Cardinal slam-lines (cracks radiating out)
+                    g.lineStyle(3, tierColor, ringAlpha * 0.7);
+                    for (let b = 0; b < 4; b++) {
+                        const a = b * (Math.PI / 2);
+                        g.moveTo(sx + Math.cos(a) * waveR * 0.2, sy + Math.sin(a) * waveR * 0.2);
+                        g.lineTo(sx + Math.cos(a) * waveR * 1.05, sy + Math.sin(a) * waveR * 1.05);
+                    }
+                    g.lineStyle(0);
+                    break;
+                }
+
+                case 12: { // WARRIOR_BUFF — battle-cry burst
+                    // Distinct from the priest heal: short-lived radial
+                    // chevrons + tier-coloured flash. Reads as "rallying
+                    // cry" instead of "healing wave".
+                    const buffR = r * (0.5 + progress * 0.55);
+                    // Outer halo
+                    g.beginFill(tierColor, alpha * 0.22);
+                    g.drawCircle(sx, sy, buffR);
+                    g.endFill();
+                    // Bright tier-coloured ring + white inner ring
+                    g.lineStyle(5, tierColor, alpha * 0.9);
+                    g.drawCircle(sx, sy, buffR);
+                    g.lineStyle(2, 0xffffff, alpha * 0.85);
+                    g.drawCircle(sx, sy, buffR * 0.85);
+                    g.lineStyle(0);
+                    // Rotating chevrons (V-shapes) — speed/aggression motif
+                    const chevrons = 8;
+                    for (let i = 0; i < chevrons; i++) {
+                        const a = (i / chevrons) * Math.PI * 2 + elapsed * 0.007;
+                        const cx = sx + Math.cos(a) * buffR * 0.7;
+                        const cy = sy + Math.sin(a) * buffR * 0.7;
+                        // Chevron points outward radially
+                        const ox = Math.cos(a), oy = Math.sin(a);
+                        const tx = -oy, ty = ox; // tangent
+                        g.lineStyle(3, 0xffffff, alpha * 0.95);
+                        g.moveTo(cx - tx * 5 - ox * 2, cy - ty * 5 - oy * 2);
+                        g.lineTo(cx + ox * 6, cy + oy * 6);
+                        g.lineTo(cx + tx * 5 - ox * 2, cy + ty * 5 - oy * 2);
+                        g.lineStyle(0);
+                    }
+                    // Initial cry flash
+                    if (progress < 0.2) {
+                        const flashA = 1.0 - progress / 0.2;
+                        g.beginFill(0xffffff, flashA * 0.9);
+                        g.drawCircle(sx, sy, buffR * 0.35);
+                        g.endFill();
+                    }
+                    // Pulsing core
+                    const pulse = 0.7 + 0.3 * Math.sin(elapsed * 0.025);
+                    g.beginFill(tierColor, alpha * 0.7 * pulse);
+                    g.drawCircle(sx, sy, buffR * 0.22);
+                    g.endFill();
                     break;
                 }
             }
@@ -1985,6 +2253,19 @@ export class GameRenderer {
             txt.scale.set(scale);
         }
     }
+
+    // Tier color palette — drives the tier-aware tinting in
+    // renderVisualEffects so heal/poison/trap/lightning/etc. read at a
+    // glance as T0..T6. Indices map directly to item.getTier().
+    static TIER_COLORS = [
+        0xc0c0c0, // T0 silver
+        0x60c0ff, // T1 light blue
+        0x60ff80, // T2 green
+        0xffd040, // T3 yellow / gold
+        0xff8040, // T4 orange
+        0xff4060, // T5 red
+        0xc060ff  // T6 purple
+    ];
 
     // Status effect icon definitions: [effectId, symbol, color]
     static STATUS_ICON_DEFS = [

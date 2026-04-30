@@ -1650,6 +1650,7 @@ function setupNetworkHandlers() {
             radius: data.radius,
             duration: data.duration,
             targetX: data.targetPosX, targetY: data.targetPosY,
+            tier: data.tier || 0,
             startTime: Date.now()
         });
     });
