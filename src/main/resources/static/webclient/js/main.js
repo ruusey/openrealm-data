@@ -1723,6 +1723,33 @@ function setupNetworkHandlers() {
     });
 
     network.on(PacketId.TEXT, (data) => {
+        // EVENT_MARKER packets are out-of-band minimap updates, not chat.
+        // Body is one of:
+        //   "ADD|eventId|bossId|x|y|name"
+        //   "REMOVE|bossId"
+        // The server re-broadcasts ADD every ~3s so newly-joined clients
+        // pick up active events without needing snapshot history.
+        if (data.from === 'EVENT_MARKER') {
+            try {
+                const parts = (data.message || '').split('|');
+                if (parts[0] === 'ADD' && parts.length >= 6) {
+                    if (!game.eventMarkers) game.eventMarkers = new Map();
+                    const bossId = parts[2];
+                    game.eventMarkers.set(bossId, {
+                        eventId: parseInt(parts[1]),
+                        bossId,
+                        x: parseFloat(parts[3]),
+                        y: parseFloat(parts[4]),
+                        name: parts.slice(5).join('|'),
+                        lastSeen: Date.now()
+                    });
+                } else if (parts[0] === 'REMOVE' && parts.length >= 2) {
+                    if (game.eventMarkers) game.eventMarkers.delete(parts[1]);
+                }
+            } catch (e) { /* malformed marker — ignore */ }
+            return; // never display in chat
+        }
+
         game.handleText(data);
         // Capture zone name and difficulty during realm transitions
         if (game.transitionActive && data.from === 'SYSTEM') {

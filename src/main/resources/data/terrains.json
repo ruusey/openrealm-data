@@ -221,9 +221,6 @@
 				"name": "highlands",
 				"ordinal": 2,
 				"enemyIds": [
-					1,
-					2,
-					3,
 					4,
 					5,
 					11,
@@ -266,9 +263,6 @@
 				"name": "summit",
 				"ordinal": 3,
 				"enemyIds": [
-					1,
-					2,
-					3,
 					4,
 					5,
 					11,
@@ -465,9 +459,6 @@
 				"name": "World_0_Cave_0_Enemies",
 				"ordinal": 0,
 				"enemyIds": [
-					1,
-					2,
-					3,
 					4,
 					5,
 					9,
@@ -565,7 +556,6 @@
 				"name": "Grasslands_0_Enemies",
 				"ordinal": 0,
 				"enemyIds": [
-					3,
 					4,
 					5,
 					6,
@@ -845,7 +835,6 @@
 				"name": "emerald_wilds_enemies",
 				"ordinal": 0,
 				"enemyIds": [
-					3,
 					4,
 					10,
 					12,
@@ -1022,7 +1011,6 @@
 					17,
 					21,
 					24,
-					2,
 					27,
 					44,
 					87,

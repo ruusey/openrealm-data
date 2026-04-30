@@ -219,6 +219,72 @@ export class Minimap {
             }
         }
 
+        // Draw realm-event markers — boss pins on the minimap so the
+        // group can rally at an active event. Markers expire 5s after
+        // their last refresh from the server in case the REMOVE got
+        // lost. Event marker pulses + skull glyph + name label.
+        if (gameState.eventMarkers && gameState.eventMarkers.size > 0) {
+            const now = Date.now();
+            const STALE_MS = 8000; // 2 missed refreshes (~3s each)
+            const pulse = 0.55 + 0.45 * Math.sin(now * 0.005);
+            for (const [bossId, m] of gameState.eventMarkers) {
+                if (now - (m.lastSeen || 0) > STALE_MS) {
+                    gameState.eventMarkers.delete(bossId);
+                    continue;
+                }
+                const tx = m.x / ts - srcX;
+                const ty = m.y / ts - srcY;
+                const px = tx * scaleX;
+                const py = ty * scaleY;
+                // Edge-of-minimap arrow if marker is off-view
+                if (px < 0 || px > cw || py < 0 || py > ch) {
+                    const ex = Math.max(8, Math.min(cw - 8, px));
+                    const ey = Math.max(8, Math.min(ch - 8, py));
+                    const dx = px - ex, dy = py - ey;
+                    const arrowAng = Math.atan2(dy, dx);
+                    ctx.save();
+                    ctx.translate(ex, ey);
+                    ctx.rotate(arrowAng);
+                    ctx.fillStyle = `rgba(255, 80, 80, ${0.7 + 0.3 * pulse})`;
+                    ctx.beginPath();
+                    ctx.moveTo(7, 0);
+                    ctx.lineTo(-3, -5);
+                    ctx.lineTo(-3, 5);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.restore();
+                    continue;
+                }
+                // On-view: pulsing red ring + skull glyph + label
+                ctx.beginPath();
+                ctx.arc(px, py, 8 + pulse * 3, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(180, 30, 30, ${0.25 + 0.20 * pulse})`;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(px, py, 5, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 80, 80, ${0.85})`;
+                ctx.fill();
+                // Skull/cross glyph
+                ctx.font = 'bold 11px monospace';
+                ctx.fillStyle = '#000';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('☠', px, py + 1);
+                // Name label below the pin
+                if (m.name) {
+                    ctx.font = '9px monospace';
+                    ctx.textAlign = 'center';
+                    const tw = ctx.measureText(m.name).width;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(px - tw / 2 - 3, py + 8, tw + 6, 12);
+                    ctx.fillStyle = '#ffaa66';
+                    ctx.fillText(m.name, px, py + 14);
+                }
+                ctx.textAlign = 'start';
+                ctx.textBaseline = 'alphabetic';
+            }
+        }
+
         // Draw hovered player name tooltip
         if (this.hoveredPlayer) {
             const mp = this.hoveredPlayer;

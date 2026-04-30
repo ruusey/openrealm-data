@@ -25,39 +25,101 @@
 		},
 		"phases": [
 			{
-				"name": "orbit",
+				"name": "spiral",
 				"hpThreshold": 1,
 				"movement": {
 					"type": "ANCHOR",
 					"speed": 1.8,
-					"radius": 120,
+					"anchorRadius": 110
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 211,
+						"cooldownMs": 460,
+						"burstCount": 2,
+						"burstDelayMs": 80
+					},
+					{
+						"projectileGroupId": 8,
+						"cooldownMs": 1300,
+						"burstCount": 1
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 2200,
+						"aimMode": "RING",
+						"shotCount": 8,
+						"burstCount": 1
+					}
+				]
+			},
+			{
+				"name": "chaos",
+				"hpThreshold": 0.6,
+				"movement": {
+					"type": "ORBIT",
+					"speed": 1.6,
+					"radius": 140,
 					"direction": "CW"
 				},
 				"attacks": [
 					{
 						"projectileGroupId": 211,
-						"cooldownMs": 360,
+						"cooldownMs": 280,
+						"burstCount": 3,
+						"burstDelayMs": 60,
+						"angleOffsetPerBurst": 0.18
+					},
+					{
+						"projectileGroupId": 47,
+						"cooldownMs": 800,
 						"burstCount": 2,
-						"burstDelayMs": 70
+						"burstDelayMs": 100
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1600,
+						"aimMode": "RING",
+						"shotCount": 10,
+						"burstCount": 1,
+						"angleOffsetPerBurst": 0.15
+					},
+					{
+						"projectileGroupId": 106,
+						"cooldownMs": 2500,
+						"burstCount": 1
 					}
 				]
 			},
 			{
-				"name": "enraged",
-				"hpThreshold": 0.4,
+				"name": "annihilate",
+				"hpThreshold": 0.25,
 				"movement": {
 					"type": "CHARGE",
-					"speed": 2,
-					"chargeDistanceMin": 40,
-					"pauseMs": 400
+					"speed": 2.4,
+					"chargeDistanceMin": 60,
+					"pauseMs": 350
 				},
 				"attacks": [
 					{
 						"projectileGroupId": 211,
-						"cooldownMs": 180,
+						"cooldownMs": 220,
 						"burstCount": 4,
-						"burstDelayMs": 56,
-						"angleOffsetPerBurst": 0.15
+						"burstDelayMs": 50,
+						"angleOffsetPerBurst": 0.2
+					},
+					{
+						"projectileGroupId": 8,
+						"cooldownMs": 700,
+						"burstCount": 1
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1400,
+						"aimMode": "RING",
+						"shotCount": 12,
+						"burstCount": 2,
+						"angleOffsetPerBurst": 0.1
 					}
 				]
 			}
@@ -85,7 +147,7 @@
 		},
 		"phases": [
 			{
-				"name": "stationary",
+				"name": "summon",
 				"hpThreshold": 1,
 				"movement": {
 					"type": "ANCHOR",
@@ -95,15 +157,80 @@
 				"attacks": [
 					{
 						"projectileGroupId": 2,
-						"cooldownMs": 720,
+						"cooldownMs": 600,
 						"burstCount": 2,
 						"burstDelayMs": 70
 					},
 					{
-						"projectileGroupId": 45,
-						"cooldownMs": 1800,
+						"projectileGroupId": 47,
+						"cooldownMs": 1300,
 						"burstCount": 2,
-						"burstDelayMs": 70
+						"burstDelayMs": 80
+					},
+					{
+						"projectileGroupId": 45,
+						"cooldownMs": 2400,
+						"burstCount": 1
+					}
+				]
+			},
+			{
+				"name": "wrath",
+				"hpThreshold": 0.5,
+				"movement": {
+					"type": "ANCHOR",
+					"speed": 0.5,
+					"anchorRadius": 30
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 2,
+						"cooldownMs": 380,
+						"burstCount": 3,
+						"burstDelayMs": 60
+					},
+					{
+						"projectileGroupId": 8,
+						"cooldownMs": 950,
+						"burstCount": 1
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1900,
+						"aimMode": "RING",
+						"shotCount": 8,
+						"burstCount": 1
+					}
+				]
+			},
+			{
+				"name": "death-throes",
+				"hpThreshold": 0.2,
+				"movement": {
+					"type": "ANCHOR",
+					"speed": 0.5,
+					"anchorRadius": 30
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 2,
+						"cooldownMs": 250,
+						"burstCount": 4,
+						"burstDelayMs": 50,
+						"angleOffsetPerBurst": 0.18
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1200,
+						"aimMode": "RING",
+						"shotCount": 12,
+						"burstCount": 2,
+						"angleOffsetPerBurst": 0.13
+					},
+					{
+						"projectileGroupId": 106,
+						"cooldownMs": 3000,
+						"burstCount": 1
 					}
 				]
 			}
@@ -130,39 +257,82 @@
 		},
 		"phases": [
 			{
-				"name": "strafe",
+				"name": "haunt",
 				"hpThreshold": 1,
 				"movement": {
 					"type": "STRAFE",
 					"speed": 2,
-					"preferredRange": 100
+					"preferredRange": 110
 				},
 				"attacks": [
 					{
 						"projectileGroupId": 1,
 						"cooldownMs": 480,
 						"burstCount": 3,
-						"burstDelayMs": 84
+						"burstDelayMs": 80
+					},
+					{
+						"projectileGroupId": 47,
+						"cooldownMs": 1100,
+						"burstCount": 2,
+						"burstDelayMs": 90
 					}
 				]
 			},
 			{
-				"name": "flee",
-				"hpThreshold": 0.3,
+				"name": "spectral-storm",
+				"hpThreshold": 0.55,
 				"movement": {
-					"type": "FLEE",
-					"speed": 2.5,
-					"fleeRange": 100
+					"type": "STRAFE",
+					"speed": 2.4,
+					"preferredRange": 130
 				},
 				"attacks": [
 					{
 						"projectileGroupId": 1,
-						"cooldownMs": 400,
-						"burstCount": 1,
-						"burstDelayMs": 56,
-						"angleIncrementPerFiring": 0.2,
+						"cooldownMs": 380,
+						"burstCount": 3,
+						"burstDelayMs": 70,
+						"angleOffsetPerBurst": 0.12
+					},
+					{
+						"projectileGroupId": 8,
+						"cooldownMs": 900,
+						"burstCount": 1
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1700,
 						"aimMode": "RING",
-						"shotCount": 4
+						"shotCount": 8,
+						"burstCount": 1
+					}
+				]
+			},
+			{
+				"name": "vengeful-flight",
+				"hpThreshold": 0.25,
+				"movement": {
+					"type": "FLEE",
+					"speed": 2.6,
+					"fleeRange": 110
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 1,
+						"cooldownMs": 320,
+						"burstCount": 1,
+						"aimMode": "RING",
+						"shotCount": 5,
+						"angleIncrementPerFiring": 0.2
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1100,
+						"aimMode": "RING",
+						"shotCount": 10,
+						"burstCount": 2,
+						"angleOffsetPerBurst": 0.18
 					}
 				]
 			}
@@ -3535,7 +3705,105 @@
 			"vit": 0,
 			"wis": 0
 		},
-		"phases": []
+		"phases": [
+			{
+				"name": "march",
+				"hpThreshold": 1,
+				"movement": {
+					"type": "ANCHOR",
+					"speed": 1.0,
+					"anchorRadius": 80
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 45,
+						"cooldownMs": 720,
+						"burstCount": 2,
+						"burstDelayMs": 80
+					},
+					{
+						"projectileGroupId": 47,
+						"cooldownMs": 1500,
+						"burstCount": 2,
+						"burstDelayMs": 100
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 3000,
+						"aimMode": "RING",
+						"shotCount": 6,
+						"burstCount": 1
+					}
+				]
+			},
+			{
+				"name": "reaping",
+				"hpThreshold": 0.66,
+				"movement": {
+					"type": "CHARGE",
+					"speed": 1.7,
+					"chargeDistanceMin": 50,
+					"pauseMs": 500
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 100,
+						"cooldownMs": 520,
+						"burstCount": 2,
+						"burstDelayMs": 70
+					},
+					{
+						"projectileGroupId": 8,
+						"cooldownMs": 1100,
+						"burstCount": 1
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1600,
+						"aimMode": "RING",
+						"shotCount": 8,
+						"burstCount": 1,
+						"angleOffsetPerBurst": 0.1
+					}
+				]
+			},
+			{
+				"name": "wrath-of-the-lost",
+				"hpThreshold": 0.33,
+				"movement": {
+					"type": "ANCHOR",
+					"speed": 1.5,
+					"anchorRadius": 60
+				},
+				"attacks": [
+					{
+						"projectileGroupId": 100,
+						"cooldownMs": 380,
+						"burstCount": 3,
+						"burstDelayMs": 60,
+						"angleOffsetPerBurst": 0.2
+					},
+					{
+						"projectileGroupId": 8,
+						"cooldownMs": 700,
+						"burstCount": 1
+					},
+					{
+						"projectileGroupId": 21,
+						"cooldownMs": 1700,
+						"aimMode": "RING",
+						"shotCount": 12,
+						"burstCount": 2,
+						"angleOffsetPerBurst": 0.1
+					},
+					{
+						"projectileGroupId": 106,
+						"cooldownMs": 4500,
+						"burstCount": 1
+					}
+				]
+			}
+		]
 	},
 	{
 		"enemyId": 67,
