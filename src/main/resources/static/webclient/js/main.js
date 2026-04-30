@@ -72,6 +72,12 @@ function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(`${name}-screen`).classList.add('active');
     currentScreen = name;
+    // Drop focus from any input/button so mobile keyboards dismiss and the
+    // game canvas immediately receives touch/key events (e.g. shooting joystick
+    // works without an extra tap after login).
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+    }
     // The difficulty icon and account-fame badge are fixed-position overlays
     // that live OUTSIDE the screen containers, so they don't auto-hide on
     // screen change. Only reveal them while playing — updateHUD() will set
@@ -1751,14 +1757,10 @@ function setupNetworkHandlers() {
         }
 
         game.handleText(data);
-        // Capture zone name and difficulty during realm transitions
-        if (game.transitionActive && data.from === 'SYSTEM') {
-            if (!game.transitionZoneName && !data.message.startsWith('Difficulty:') && !data.message.startsWith('Enemies:')) {
-                game.transitionZoneName = data.message;
-            } else if (data.message.startsWith('Difficulty:')) {
-                const diff = parseFloat(data.message.replace('Difficulty: ', ''));
-                if (!isNaN(diff)) game.transitionDifficulty = diff;
-            }
+        // Capture zone name during realm transitions (server no longer
+        // sends Difficulty/Enemies lines — those skulls are gone now).
+        if (game.transitionActive && data.from === 'SYSTEM' && !game.transitionZoneName) {
+            game.transitionZoneName = data.message;
         }
         // Look up sender's chatRole from player map for name coloring
         const senderRole = game.getPlayerRoleByName(data.from);
@@ -2731,7 +2733,8 @@ function updateInventoryUI() {
 const TRANSITION_DURATION_MS = 2000;
 const TRANSITION_FADE_MS = 400;
 let _transitionAnimFrame = 0;
-let _transitionAnimTimer = 0;
+let _transitionAnimMs = 0;
+let _transitionLastFrameTime = 0;
 let _transitionSpriteFrames = null;
 
 function showTransitionScreen() {
@@ -2744,7 +2747,8 @@ function showTransitionScreen() {
     document.getElementById('transition-skulls').innerHTML = '';
     document.getElementById('transition-diff-label').textContent = '';
     _transitionAnimFrame = 0;
-    _transitionAnimTimer = 0;
+    _transitionAnimMs = 0;
+    _transitionLastFrameTime = 0;
     _transitionSpriteFrames = null;
     // Clear sprite canvas
     const canvas = document.getElementById('transition-player-sprite');
@@ -2819,21 +2823,19 @@ function renderTransitionSprite() {
         if (_transitionSpriteFrames.length === 0) { _transitionSpriteFrames = null; return; }
     }
 
-    // Frame-advance pace scales with the local player's movement speed
-    // stat so a fast Ninja's transition sprite walks faster than a slow
-    // Knight's. Falls back to a reasonable default (~120ms / frame)
-    // when the stat isn't available yet during early transition.
-    const localStats = (game.players && game.playerId != null)
-            ? game.players.get(game.playerId)?.stats : null;
-    // SPD typically ranges 7..75; map to a frame interval of
-    // 200ms (slow) → 60ms (fast). Result roughly matches the in-game
-    // walking cadence for that class.
-    const spd = (localStats && typeof localStats.spd === 'number') ? localStats.spd : 30;
-    const FRAME_MS = Math.max(60, 240 - spd * 2.4);
-    const FRAME_TICKS = Math.max(3, Math.round(FRAME_MS / 16.67));
-    _transitionAnimTimer++;
-    if (_transitionAnimTimer >= FRAME_TICKS) {
-        _transitionAnimTimer = 0;
+    // Frame-advance pace uses real elapsed time (not render frames) and
+    // scales with the SPD snapshot captured at transition start. This matches
+    // the in-game walk cadence: ~200ms/frame at low SPD, ~80ms/frame at
+    // SPD 75 (max). Without the snapshot we'd fall back to default mid-walk
+    // since the player record gets cleared during the realm switch.
+    const spd = (typeof game.transitionSpd === 'number') ? game.transitionSpd : 30;
+    const FRAME_MS = Math.max(80, 220 - spd * 1.9);
+    const now = Date.now();
+    if (_transitionLastFrameTime === 0) _transitionLastFrameTime = now;
+    _transitionAnimMs += (now - _transitionLastFrameTime);
+    _transitionLastFrameTime = now;
+    if (_transitionAnimMs >= FRAME_MS) {
+        _transitionAnimMs = 0;
         _transitionAnimFrame = (_transitionAnimFrame + 1) % _transitionSpriteFrames.length;
     }
 

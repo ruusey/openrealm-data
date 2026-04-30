@@ -264,8 +264,13 @@ export class GameState {
         this.mapTiles = null;
         this.mapWidth = 0;
         this.mapHeight = 0;
-        // Capture transition info for loading screen
+        // Capture transition info for loading screen.
+        // Snapshot the local player's SPD stat now — once the realm flips,
+        // the player record is cleared and the loading-screen sprite would
+        // otherwise fall back to a default and walk way too fast.
         this.transitionClassId = this.classId || 0;
+        const localStats = (this.playerId != null) ? this.players.get(this.playerId)?.stats : null;
+        this.transitionSpd = (localStats && typeof localStats.spd === 'number') ? localStats.spd : 30;
         this.transitionActive = true;
         this.transitionStartTime = Date.now();
         this.transitionZoneName = '';
