@@ -726,15 +726,22 @@ let _fameStoreCurrentBalance = 0;
 let _fameStoreInitialized = false;
 
 function _fameStoreItemList() {
-    // Fame-shop items: every entry in game.itemData with category 'dye'.
-    // Future patterned cloths sharing the 'dye' category will appear too;
-    // a separate 'cloth' category later would split the modal into tabs.
+    // Fame-shop items: dyes (cosmetic) + enchantment crystals
+    // (forge-fodder, items 808–815). Both categories cost the same flat
+    // 500 fame per item — server-side gating in ServerFameStoreHelper.
     if (!game.itemData) return [];
     const list = [];
     for (const def of Object.values(game.itemData)) {
-        if (def && def.category === 'dye') list.push(def);
+        if (!def) continue;
+        if (def.category === 'dye' || def.category === 'crystal') list.push(def);
     }
-    list.sort((a, b) => (a.itemId || 0) - (b.itemId || 0));
+    // Group dyes first, then crystals; itemId-asc within each group.
+    list.sort((a, b) => {
+        const ca = a.category === 'dye' ? 0 : 1;
+        const cb = b.category === 'dye' ? 0 : 1;
+        if (ca !== cb) return ca - cb;
+        return (a.itemId || 0) - (b.itemId || 0);
+    });
     return list;
 }
 
