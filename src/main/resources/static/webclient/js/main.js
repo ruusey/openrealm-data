@@ -317,7 +317,8 @@ const _charSpriteSheets = {};
 // --- Character Select & Management ---
 const ALL_CLASSES = [
     'Rogue', 'Archer', 'Wizard', 'Priest', 'Warrior', 'Knight',
-    'Paladin', 'Assassin', 'Necromancer', 'Mystic', 'Trickster', 'Sorcerer', 'Huntress'
+    'Paladin', 'Assassin', 'Necromancer', 'Mystic', 'Trickster', 'Sorcerer', 'Huntress',
+    'Ninja'
 ];
 let selectedClassId = null;
 let _animDataByClass = {}; // classId -> animation model, loaded once for char select icons

@@ -213,9 +213,9 @@ public class PlayerDataService {
         return results;
     }
 
-    private static final int MAX_CHARACTERS = 20;
+    private static final int MAX_CHARACTERS = 15;
     private static final int MAX_CHARACTERS_DEMO = 1;
-    private static final int MAX_CHESTS = 10;
+    private static final int MAX_CHESTS = 15;
     private static final int MAX_CHESTS_DEMO = 1;
 
     public PlayerAccountDto createCharacter(final String accountUuid, final Integer classId) throws Exception {
