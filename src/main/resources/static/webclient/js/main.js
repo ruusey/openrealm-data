@@ -3245,19 +3245,19 @@ function canEquipInSlot(itemDef, targetSlotIdx, playerClassId) {
     if (tc == null || tc === -4) return true; // ALL
     if (tc >= 0) return tc === playerClassId;
     // Class groups: Wizard 2 / Priest 3 / Necromancer 8 / Mystic 9 / Sorcerer 11 = ROBE
-    //               Archer 1 / Rogue 0 / Assassin 7 / Trickster 10 / Huntress 12 = LEATHER
+    //               Archer 1 / Rogue 0 / Assassin 7 / Trickster 10 / Huntress 12 / Ninja 13 = LEATHER
     //               Warrior 4 / Knight 5 / Paladin 6 = HEAVY
     const ROBE    = new Set([2, 3, 8, 9, 11]);
-    const LEATHER = new Set([0, 1, 7, 10, 12]);
+    const LEATHER = new Set([0, 1, 7, 10, 12, 13]);
     const HEAVY   = new Set([4, 5, 6]);
     // Weapon-type users — same groupings as Java's CharacterClass:
     //   isStaffUser  -> Wizard, Necromancer, Mystic
     //   isWandUser   -> Priest, Sorcerer
-    //   isDaggerUser -> Rogue, Assassin, Trickster
+    //   isDaggerUser -> Rogue, Assassin, Trickster, Ninja
     //   isBowUser    -> Archer, Huntress
     const STAFF  = new Set([2, 8, 9]);
     const WAND   = new Set([3, 11]);
-    const DAGGER = new Set([0, 7, 10]);
+    const DAGGER = new Set([0, 7, 10, 13]);
     const BOW    = new Set([1, 12]);
     switch (tc) {
         case -1: return ROBE.has(playerClassId);
