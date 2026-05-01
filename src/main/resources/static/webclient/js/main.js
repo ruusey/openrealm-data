@@ -2829,13 +2829,17 @@ function renderTransitionSprite() {
         if (_transitionSpriteFrames.length === 0) { _transitionSpriteFrames = null; return; }
     }
 
-    // Frame-advance pace uses real elapsed time (not render frames) and
-    // scales with the SPD snapshot captured at transition start. This matches
-    // the in-game walk cadence: ~200ms/frame at low SPD, ~80ms/frame at
-    // SPD 75 (max). Without the snapshot we'd fall back to default mid-walk
-    // since the player record gets cleared during the realm switch.
+    // Match in-game walk cadence exactly: leg swap every 24px traveled at
+    // the character's spd-derived movement speed. Server formula is
+    // tiles/sec = 4 + 5.6 * (spd/75), and a tile is 32px. So:
+    //   FRAME_MS = 24000 / ((4 + 5.6 * spd/75) * 32)
+    // Yields ~188ms at spd=0, ~78ms at spd=75 — same gait the in-world
+    // sprite would show at this character's speed. Snapshot is taken at
+    // transition start since the player record clears mid-transition.
     const spd = (typeof game.transitionSpd === 'number') ? game.transitionSpd : 30;
-    const FRAME_MS = Math.max(80, 220 - spd * 1.9);
+    const tilesPerSec = 4.0 + 5.6 * (spd / 75.0);
+    const pxPerSec = tilesPerSec * 32.0;
+    const FRAME_MS = 24000.0 / pxPerSec;
     const now = Date.now();
     if (_transitionLastFrameTime === 0) _transitionLastFrameTime = now;
     _transitionAnimMs += (now - _transitionLastFrameTime);

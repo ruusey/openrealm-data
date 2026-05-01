@@ -706,18 +706,35 @@
           <label>Width: <input type="number" id="spWidth" min="1" max="32"></label>
           <label>Height: <input type="number" id="spHeight" min="1" max="32"></label>
         </div>
-        <div style="margin:6px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="map-layer-controls">
           <label>Layer:
-            <select id="spLayerSelect" style="width:120px">
+            <select id="spLayerSelect" style="width:140px">
               <option value="0">0 - Base (Floor)</option>
               <option value="1">1 - Collision (Objects)</option>
             </select>
           </label>
           <span id="spBrushInfo" class="map-brush-info">Brush: (none)</span>
-          <button id="spPickTileBtn" class="btn-add">Select Brush Tile</button>
+          <label><input type="checkbox" id="spShowGrid" checked> Grid</label>
         </div>
-        <div style="overflow:auto;max-height:500px;border:1px solid #444;margin:6px 0">
-          <canvas id="spCanvas" width="240" height="240" style="cursor:crosshair"></canvas>
+        <div style="font-size:11px;color:#888;margin:2px 0 6px 0">
+          Click a tile in the left sprite-sheet panel to set the brush.
+          Unregistered cells open a quick-create dialog.
+        </div>
+        <div class="map-canvas-scroll" style="max-height:500px">
+          <div class="map-canvas-container">
+            <canvas id="spCanvas" width="240" height="240"></canvas>
+            <canvas id="spOverlayCanvas" width="240" height="240" style="cursor:crosshair"></canvas>
+          </div>
+        </div>
+        <div id="spHoverInfo" class="hover-info">Tile: - Layer: -</div>
+        <!-- Inline searchable tile list (alternative way to set the brush
+             without using the sprite-sheet click flow). -->
+        <div style="margin-top:8px;border-top:1px solid #333;padding-top:6px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <h4 style="margin:0;font-size:12px;color:#8cf">Brush Tiles</h4>
+            <input type="text" id="spBrushSearch" placeholder="Search tiles..." style="flex:1;font-size:11px">
+          </div>
+          <div id="spBrushList" style="max-height:160px;overflow:auto;background:#0a0a1a;border:1px solid #333;border-radius:3px"></div>
         </div>
         <div class="detail-actions">
           <button onclick="applySetPiece()" class="btn-apply">Apply</button>
@@ -769,6 +786,44 @@
       <button id="pickerCloseBtn" class="tg-remove" style="font-size:20px">&times;</button>
     </div>
     <div class="picker-list" id="pickerList"></div>
+  </div>
+</div>
+<!-- Quick-create-tile Modal (used by SetPiece editor when clicking an
+     unregistered cell on the main sprite-sheet grid) -->
+<div id="quickTileOverlay" class="picker-overlay" style="display:none">
+  <div class="picker-modal" style="width:380px">
+    <div class="picker-header">
+      <h3>Quick Create Tile</h3>
+      <button id="quickTileCloseBtn" class="tg-remove" style="font-size:20px">&times;</button>
+    </div>
+    <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+      <div id="quickTilePreview" style="background:#0a0a1a;border:1px solid #333;padding:6px;display:flex;align-items:center;gap:10px;font-size:11px;color:#aaa">
+        <canvas id="quickTilePreviewCanvas" width="48" height="48" style="image-rendering:pixelated;background:#000"></canvas>
+        <div id="quickTilePreviewInfo">Sheet: - | Row 0 Col 0</div>
+      </div>
+      <label style="display:flex;flex-direction:column;font-size:11px;gap:2px">
+        <span>Name</span>
+        <input type="text" id="quickTileName">
+      </label>
+      <label style="display:flex;flex-direction:column;font-size:11px;gap:2px">
+        <span>Tile Size (world px)</span>
+        <input type="number" id="quickTileSize" value="32" min="8" max="64">
+      </label>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;border-top:1px solid #333;padding-top:8px">
+        <label><input type="checkbox" id="quickTileCollision"> Has Collision</label>
+        <label><input type="checkbox" id="quickTileWall"> Is Wall</label>
+        <label><input type="checkbox" id="quickTileSlows"> Slows</label>
+        <label><input type="checkbox" id="quickTileDamaging"> Damaging</label>
+      </div>
+      <label style="display:flex;flex-direction:column;font-size:11px;gap:2px">
+        <span>Interaction Type (optional, e.g. "forge")</span>
+        <input type="text" id="quickTileInteraction" placeholder="(none)">
+      </label>
+      <div style="display:flex;justify-content:flex-end;gap:6px;border-top:1px solid #333;padding-top:8px">
+        <button id="quickTileCancelBtn" class="btn-pick">Cancel</button>
+        <button id="quickTileCreateBtn" class="btn-apply">Create &amp; Use</button>
+      </div>
+    </div>
   </div>
 </div>
 <!-- Enemy Picker Modal -->

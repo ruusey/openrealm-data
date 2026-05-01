@@ -198,8 +198,8 @@ select:focus, input:focus { outline: none; border-color: #e94560; }
   position: relative; min-height: 0;
 }
 .map-canvas-container { position: relative; display: inline-block; }
-#mapCanvas, #mapOverlayCanvas { image-rendering: pixelated; display: block; }
-#mapOverlayCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
+#mapCanvas, #mapOverlayCanvas, #spCanvas, #spOverlayCanvas { image-rendering: pixelated; display: block; }
+#mapOverlayCanvas, #spOverlayCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
 .dp-checkboxes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .dp-checkboxes label { font-size: 11px; display: flex; align-items: center; gap: 2px; }
 

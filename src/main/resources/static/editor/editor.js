@@ -2617,17 +2617,20 @@ function stampSetPieceOnMap(e) {
   const m = selectedMap;
   if (!sp || !m || !m.data) return;
 
+  // Stamp every layer present in the setpiece's data map. Layer keys
+  // ('0', '1', ...) match TileManager / static-map indices, so a layer
+  // in the setpiece writes to the same-named layer of the target map.
+  const spData = sp.data || {};
   for (let dy = 0; dy < sp.height; dy++) {
     for (let dx = 0; dx < sp.width; dx++) {
       const tr = row + dy, tc = col + dx;
       if (tr < 0 || tr >= m.height || tc < 0 || tc >= m.width) continue;
-      // Stamp base layer
-      if (sp.baseLayout && sp.baseLayout[dy] && sp.baseLayout[dy][dx] > 0) {
-        if (m.data['0'] && m.data['0'][tr]) m.data['0'][tr][tc] = sp.baseLayout[dy][dx];
-      }
-      // Stamp collision layer
-      if (sp.collisionLayout && sp.collisionLayout[dy] && sp.collisionLayout[dy][dx] > 0) {
-        if (m.data['1'] && m.data['1'][tr]) m.data['1'][tr][tc] = sp.collisionLayout[dy][dx];
+      for (const layerKey of Object.keys(spData)) {
+        const src = spData[layerKey];
+        if (!src || !src[dy] || src[dy][dx] <= 0) continue;
+        const dst = m.data[layerKey];
+        if (!dst || !dst[tr]) continue;
+        dst[tr][tc] = src[dy][dx];
       }
     }
   }
@@ -3858,13 +3861,46 @@ function deletePortal() {
 }
 
 // ========== SET PIECES ==========
+// Setpieces store tile data in `sp.data` keyed by string layer indices
+// ("0" = base, "1" = collision/decoration), exactly matching the static-map
+// MapModel structure. The editor below mirrors the static-map editor's
+// behavior: per-layer painting, right-click erase, layer-aware rendering.
 async function loadSetPieces() {
   try {
     setpieces = await (await fetch(`${BASE}/setpieces.json`)).json();
     setpieces.sort((a, b) => a.setPieceId - b.setPieceId);
+    // Defensive: ensure every loaded setpiece has data["0"] and data["1"]
+    // sized to width/height. New setpieces created in this session always
+    // satisfy this; old ones that somehow lack a layer get zero-filled.
+    for (const sp of setpieces) ensureSpLayers(sp);
   } catch (e) { setpieces = []; }
   const el = document.getElementById('spCount');
   if (el) el.textContent = setpieces.length;
+}
+
+function ensureSpLayers(sp) {
+  if (!sp.data) sp.data = {};
+  for (const key of ['0', '1']) {
+    if (!sp.data[key] || !Array.isArray(sp.data[key]) || sp.data[key].length !== sp.height) {
+      sp.data[key] = makeEmptyLayer(sp.width, sp.height);
+    } else {
+      // Pad / trim rows to match width.
+      for (let r = 0; r < sp.height; r++) {
+        if (!sp.data[key][r]) sp.data[key][r] = new Array(sp.width).fill(0);
+        else if (sp.data[key][r].length !== sp.width) {
+          const old = sp.data[key][r];
+          sp.data[key][r] = new Array(sp.width).fill(0);
+          for (let c = 0; c < Math.min(old.length, sp.width); c++) sp.data[key][r][c] = old[c];
+        }
+      }
+    }
+  }
+}
+
+function makeEmptyLayer(w, h) {
+  const out = [];
+  for (let r = 0; r < h; r++) out.push(new Array(w).fill(0));
+  return out;
 }
 
 function renderSetPieceList(filter = '') {
@@ -3884,6 +3920,7 @@ function renderSetPieceList(filter = '') {
 
 function selectSetPiece(sp) {
   selectedSetPiece = sp;
+  ensureSpLayers(sp);
   renderSetPieceList();
   const detail = document.getElementById('spDetail');
   if (!detail) return;
@@ -3893,6 +3930,8 @@ function selectSetPiece(sp) {
   document.getElementById('spWidth').value = sp.width;
   document.getElementById('spHeight').value = sp.height;
   renderSpCanvas();
+  const search = document.getElementById('spBrushSearch');
+  renderSpBrushList(search ? search.value : '');
 }
 
 function applySetPiece() {
@@ -3900,10 +3939,13 @@ function applySetPiece() {
   selectedSetPiece.name = document.getElementById('spName').value;
   const newW = parseInt(document.getElementById('spWidth').value) || selectedSetPiece.width;
   const newH = parseInt(document.getElementById('spHeight').value) || selectedSetPiece.height;
-  // Resize layouts if dimensions changed
   if (newW !== selectedSetPiece.width || newH !== selectedSetPiece.height) {
-    selectedSetPiece.baseLayout = resizeLayout(selectedSetPiece.baseLayout, selectedSetPiece.width, selectedSetPiece.height, newW, newH);
-    selectedSetPiece.collisionLayout = resizeLayout(selectedSetPiece.collisionLayout, selectedSetPiece.width, selectedSetPiece.height, newW, newH);
+    // Resize every layer in `data`. Anything in the new bounds that wasn't
+    // present in the old layout is zero-filled.
+    const data = selectedSetPiece.data || {};
+    for (const key of Object.keys(data)) {
+      data[key] = resizeLayout(data[key], selectedSetPiece.width, selectedSetPiece.height, newW, newH);
+    }
     selectedSetPiece.width = newW;
     selectedSetPiece.height = newH;
   }
@@ -3917,7 +3959,7 @@ function resizeLayout(layout, oldW, oldH, newW, newH) {
   for (let r = 0; r < newH; r++) {
     const row = [];
     for (let c = 0; c < newW; c++) {
-      row.push(layout && r < oldH && c < oldW ? layout[r][c] : 0);
+      row.push(layout && r < oldH && c < oldW && layout[r] ? layout[r][c] : 0);
     }
     result.push(row);
   }
@@ -3927,9 +3969,13 @@ function resizeLayout(layout, oldW, oldH, newW, newH) {
 function addSetPiece() {
   const maxId = setpieces.reduce((max, sp) => Math.max(max, sp.setPieceId), -1);
   const w = 7, h = 7;
-  const base = [], coll = [];
-  for (let r = 0; r < h; r++) { base.push(new Array(w).fill(0)); coll.push(new Array(w).fill(0)); }
-  const sp = { setPieceId: maxId + 1, name: 'New_SetPiece_' + (maxId + 1), width: w, height: h, baseLayout: base, collisionLayout: coll };
+  const sp = {
+    setPieceId: maxId + 1,
+    name: 'New_SetPiece_' + (maxId + 1),
+    width: w,
+    height: h,
+    data: { '0': makeEmptyLayer(w, h), '1': makeEmptyLayer(w, h) }
+  };
   setpieces.push(sp);
   setpieces.sort((a, b) => a.setPieceId - b.setPieceId);
   markDirty('setpieces');
@@ -3939,55 +3985,83 @@ function addSetPiece() {
 
 const SP_TILE_PX = 24;
 
+function getSpLayer() {
+  const el = document.getElementById('spLayerSelect');
+  return el ? el.value : '0';
+}
+
+// Mirrors renderMapCanvas: base layer always drawn, collision layer drawn
+// only when the active layer is '1' (and the base is dimmed for contrast).
+// This makes WHICH layer is being edited visually obvious — same as the
+// static-map editor — instead of always overlaying both.
 function renderSpCanvas() {
   const cvs = document.getElementById('spCanvas');
   if (!cvs || !selectedSetPiece) return;
   const sp = selectedSetPiece;
-  cvs.width = sp.width * SP_TILE_PX;
-  cvs.height = sp.height * SP_TILE_PX;
+  ensureSpLayers(sp);
+  const w = sp.width * SP_TILE_PX;
+  const h = sp.height * SP_TILE_PX;
+  cvs.width = w; cvs.height = h;
+  const overlay = document.getElementById('spOverlayCanvas');
+  if (overlay) { overlay.width = w; overlay.height = h; }
+
   const ctx = cvs.getContext('2d');
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#111';
-  ctx.fillRect(0, 0, cvs.width, cvs.height);
+  ctx.fillRect(0, 0, w, h);
 
-  const layer = document.getElementById('spLayerSelect') ? document.getElementById('spLayerSelect').value : '0';
+  const layer = getSpLayer();
 
-  // Always draw base layer first
-  const baseData = sp.baseLayout;
+  // Base layer always drawn underneath.
+  const baseData = sp.data['0'];
   if (baseData) {
     for (let r = 0; r < sp.height && r < baseData.length; r++) {
       for (let c = 0; c < sp.width && c < baseData[r].length; c++) {
         const tileId = baseData[r][c];
-        if (tileId > 0) {
-          const t = getTileById(tileId);
-          if (t) drawTileAt(ctx, t, c * SP_TILE_PX, r * SP_TILE_PX, SP_TILE_PX);
-          else { ctx.fillStyle = '#335'; ctx.fillRect(c * SP_TILE_PX, r * SP_TILE_PX, SP_TILE_PX, SP_TILE_PX); }
+        const tile = getTileById(tileId);
+        if (tile) drawTileAt(ctx, tile, c * SP_TILE_PX, r * SP_TILE_PX, SP_TILE_PX);
+      }
+    }
+  }
+
+  // Collision layer: only when actually editing it (matches map editor).
+  if (layer === '1') {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, 0, w, h);
+    const colData = sp.data['1'];
+    if (colData) {
+      for (let r = 0; r < sp.height && r < colData.length; r++) {
+        for (let c = 0; c < sp.width && c < colData[r].length; c++) {
+          const tileId = colData[r][c];
+          if (tileId === 0) continue;
+          const tile = getTileById(tileId);
+          if (tile) drawTileAt(ctx, tile, c * SP_TILE_PX, r * SP_TILE_PX, SP_TILE_PX);
         }
       }
     }
   }
 
-  // Draw collision layer on top
-  const collData = sp.collisionLayout;
-  if (collData) {
-    for (let r = 0; r < sp.height && r < collData.length; r++) {
-      for (let c = 0; c < sp.width && c < collData[r].length; c++) {
-        const tileId = collData[r][c];
-        if (tileId > 0) {
-          const t = getTileById(tileId);
-          if (t) drawTileAt(ctx, t, c * SP_TILE_PX, r * SP_TILE_PX, SP_TILE_PX);
-        }
-      }
-    }
-  }
+  drawSpOverlay();
+}
 
-  // Grid overlay
-  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-  for (let r = 0; r <= sp.height; r++) {
-    ctx.beginPath(); ctx.moveTo(0, r * SP_TILE_PX); ctx.lineTo(sp.width * SP_TILE_PX, r * SP_TILE_PX); ctx.stroke();
-  }
-  for (let c = 0; c <= sp.width; c++) {
-    ctx.beginPath(); ctx.moveTo(c * SP_TILE_PX, 0); ctx.lineTo(c * SP_TILE_PX, sp.height * SP_TILE_PX); ctx.stroke();
+function drawSpOverlay() {
+  const overlay = document.getElementById('spOverlayCanvas');
+  if (!overlay || !selectedSetPiece) return;
+  const sp = selectedSetPiece;
+  const w = sp.width * SP_TILE_PX;
+  const h = sp.height * SP_TILE_PX;
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  const showGrid = document.getElementById('spShowGrid');
+  if (!showGrid || showGrid.checked) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= w; x += SP_TILE_PX) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+    }
+    for (let y = 0; y <= h; y += SP_TILE_PX) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
   }
 }
 
@@ -4019,44 +4093,292 @@ function paintSpCell(row, col) {
   if (!selectedSetPiece || spBrushTileId < 0) return;
   const sp = selectedSetPiece;
   if (row < 0 || row >= sp.height || col < 0 || col >= sp.width) return;
-  const layer = document.getElementById('spLayerSelect') ? document.getElementById('spLayerSelect').value : '0';
-  const layout = layer === '1' ? sp.collisionLayout : sp.baseLayout;
-  if (!layout || !layout[row]) return;
-  if (layout[row][col] === spBrushTileId) return;
-  layout[row][col] = spBrushTileId;
+  const layer = getSpLayer();
+  if (!sp.data[layer] || !sp.data[layer][row]) return;
+  if (sp.data[layer][row][col] === spBrushTileId) return;
+  sp.data[layer][row][col] = spBrushTileId;
   markDirty('setpieces');
-  // Redraw just the cell
+  redrawSpCell(row, col);
+}
+
+function eraseSpCell(row, col) {
+  if (!selectedSetPiece) return;
+  const sp = selectedSetPiece;
+  if (row < 0 || row >= sp.height || col < 0 || col >= sp.width) return;
+  const layer = getSpLayer();
+  if (!sp.data[layer] || !sp.data[layer][row]) return;
+  if (sp.data[layer][row][col] === 0) return;
+  sp.data[layer][row][col] = 0;
+  markDirty('setpieces');
+  redrawSpCell(row, col);
+}
+
+function redrawSpCell(row, col) {
+  const sp = selectedSetPiece;
   const cvs = document.getElementById('spCanvas');
   const ctx = cvs.getContext('2d');
   ctx.imageSmoothingEnabled = false;
+  const layer = getSpLayer();
   const x = col * SP_TILE_PX, y = row * SP_TILE_PX;
-  // Redraw base
-  ctx.fillStyle = '#111'; ctx.fillRect(x, y, SP_TILE_PX, SP_TILE_PX);
-  const baseId = sp.baseLayout && sp.baseLayout[row] ? sp.baseLayout[row][col] : 0;
-  if (baseId > 0) { const t = getTileById(baseId); if (t) drawTileAt(ctx, t, x, y, SP_TILE_PX); }
-  const collId = sp.collisionLayout && sp.collisionLayout[row] ? sp.collisionLayout[row][col] : 0;
-  if (collId > 0) { const t = getTileById(collId); if (t) drawTileAt(ctx, t, x, y, SP_TILE_PX); }
-  ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x, y, SP_TILE_PX, SP_TILE_PX);
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(x, y, SP_TILE_PX, SP_TILE_PX);
+
+  const baseId = sp.data['0'] && sp.data['0'][row] ? sp.data['0'][row][col] : 0;
+  const baseTile = getTileById(baseId);
+  if (baseTile) drawTileAt(ctx, baseTile, x, y, SP_TILE_PX);
+
+  if (layer === '1') {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(x, y, SP_TILE_PX, SP_TILE_PX);
+    const colId = sp.data['1'] && sp.data['1'][row] ? sp.data['1'][row][col] : 0;
+    if (colId !== 0) {
+      const colTile = getTileById(colId);
+      if (colTile) drawTileAt(ctx, colTile, x, y, SP_TILE_PX);
+    }
+  }
+}
+
+function spCanvasCoords(e) {
+  const overlay = document.getElementById('spOverlayCanvas');
+  const target = overlay || document.getElementById('spCanvas');
+  const rect = target.getBoundingClientRect();
+  const scaleX = target.width / rect.width;
+  const scaleY = target.height / rect.height;
+  return {
+    col: Math.floor((e.clientX - rect.left) * scaleX / SP_TILE_PX),
+    row: Math.floor((e.clientY - rect.top) * scaleY / SP_TILE_PX)
+  };
+}
+
+function spCanvasClick(e) {
+  if (!selectedSetPiece || spBrushTileId < 0) return;
+  const { row, col } = spCanvasCoords(e);
+  paintSpCell(row, col);
+}
+
+function spCanvasHover(e) {
+  if (!selectedSetPiece) return;
+  const { row, col } = spCanvasCoords(e);
+  const sp = selectedSetPiece;
+  if (row < 0 || row >= sp.height || col < 0 || col >= sp.width) return;
+  const info = document.getElementById('spHoverInfo');
+  if (!info) return;
+  const layer = getSpLayer();
+  const tileId = sp.data[layer] && sp.data[layer][row] ? sp.data[layer][row][col] : 0;
+  const tile = getTileById(tileId);
+  info.textContent = `Row: ${row}, Col: ${col} | Layer ${layer} | Tile: ${tileId} (${tile ? tile.name : '?'})`;
 }
 
 function initSpCanvasEvents() {
-  const cvs = document.getElementById('spCanvas');
-  if (!cvs) return;
-  cvs.addEventListener('mousedown', (e) => {
-    spPainting = true;
-    const rect = cvs.getBoundingClientRect();
-    const col = Math.floor((e.clientX - rect.left) / SP_TILE_PX);
-    const row = Math.floor((e.clientY - rect.top) / SP_TILE_PX);
-    paintSpCell(row, col);
+  const overlay = document.getElementById('spOverlayCanvas');
+  const target = overlay || document.getElementById('spCanvas');
+  if (!target) return;
+  target.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    spPainting = true; spCanvasClick(e);
   });
-  cvs.addEventListener('mousemove', (e) => {
-    if (!spPainting) return;
-    const rect = cvs.getBoundingClientRect();
-    const col = Math.floor((e.clientX - rect.left) / SP_TILE_PX);
-    const row = Math.floor((e.clientY - rect.top) / SP_TILE_PX);
-    paintSpCell(row, col);
+  target.addEventListener('mousemove', (e) => {
+    spCanvasHover(e);
+    if (spPainting) spCanvasClick(e);
   });
-  window.addEventListener('mouseup', () => { spPainting = false; });
+  document.addEventListener('mouseup', () => { spPainting = false; });
+  target.addEventListener('mouseleave', () => { spPainting = false; });
+  // Right-click erases the cell on the active layer (mirrors map editor).
+  target.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const { row, col } = spCanvasCoords(e);
+    eraseSpCell(row, col);
+  });
+}
+
+// Look up a tile by its sprite-sheet position. The sheet click handler
+// uses this to decide between "use existing brush" and "quick-create".
+function findTileByCell(spriteKey, row, col) {
+  return tiles.find(t => t.spriteKey === spriteKey && t.row === row && t.col === col);
+}
+
+// Scan every game-data array for an existing sprite reference at the
+// given (sheet, row, col). Used to warn the user when they're about to
+// quick-create a tile on top of a cell that's already in use elsewhere
+// (item icon, enemy sprite, projectile graphic, portal art, animation
+// frame). Returns an array of {kind, name, id} hits.
+function findSpriteRefsAt(spriteKey, row, col) {
+  const hits = [];
+  // Tiles handled separately by findTileByCell — caller already checked.
+  for (const it of (items || [])) {
+    if (it && it.spriteKey === spriteKey && it.row === row && it.col === col) {
+      hits.push({ kind: 'item', name: it.name, id: it.itemId });
+    }
+  }
+  for (const en of (enemies || [])) {
+    if (en && en.spriteKey === spriteKey && en.row === row && en.col === col) {
+      hits.push({ kind: 'enemy', name: en.name, id: en.enemyId });
+    }
+  }
+  // Projectile groups: each tab in pg.projTabs has its own row/col.
+  for (const pg of (projGroups || [])) {
+    const tabs = pg && pg.projTabs ? pg.projTabs : [];
+    for (const tab of tabs) {
+      if (tab && tab.spriteKey === spriteKey && tab.row === row && tab.col === col) {
+        hits.push({ kind: 'projGroup', name: pg.name + ' (tab)', id: pg.projGroupId });
+      }
+    }
+  }
+  for (const p of (portals || [])) {
+    if (p && p.spriteKey === spriteKey && p.row === row && p.col === col) {
+      hits.push({ kind: 'portal', name: p.portalName || p.name, id: p.portalId });
+    }
+  }
+  // Animations: each named anim has a frames[] array of {row,col} on the
+  // top-level spriteKey.
+  for (const a of (animations || [])) {
+    if (!a || a.spriteKey !== spriteKey || !a.animations) continue;
+    for (const animName of Object.keys(a.animations)) {
+      const frames = a.animations[animName] && a.animations[animName].frames;
+      if (!frames) continue;
+      for (const f of frames) {
+        if (f && f.row === row && f.col === col) {
+          hits.push({ kind: 'animation', name: `${a.name || a.entityType || 'anim'}/${animName}`, id: a.entityId });
+          break;
+        }
+      }
+    }
+  }
+  return hits;
+}
+
+// Sheet click while editing a setpiece: pick existing tile as brush, or
+// open the quick-create dialog if nothing is registered at that cell.
+// Other game-data types referencing the same cell are surfaced as a
+// warning in the dialog (so we don't silently shadow an item / enemy
+// sprite with a fresh tile entry).
+function handleSheetClickForSetPiece(spriteKey, row, col) {
+  const existing = findTileByCell(spriteKey, row, col);
+  if (existing) {
+    spBrushTileId = existing.tileId;
+    updateSpBrushInfo();
+    return;
+  }
+  const otherUses = findSpriteRefsAt(spriteKey, row, col);
+  openQuickCreateTile(spriteKey, row, col, otherUses);
+}
+
+// ========== INLINE SETPIECE BRUSH LIST ==========
+function renderSpBrushList(filter = '') {
+  const list = document.getElementById('spBrushList');
+  if (!list) return;
+  list.innerHTML = '';
+  const lf = (filter || '').toLowerCase();
+  const matched = tiles.filter(t => !lf || (t.name || '').toLowerCase().includes(lf) || String(t.tileId).includes(lf))
+                       .slice(0, 200); // cap row count for performance
+  for (const t of matched) {
+    const row = document.createElement('div');
+    row.className = 'tile-row' + (spBrushTileId === t.tileId ? ' selected' : '');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 4px;cursor:pointer;font-size:11px';
+    const cvs = document.createElement('canvas');
+    cvs.width = 18; cvs.height = 18;
+    cvs.style.imageRendering = 'pixelated';
+    drawTilePreview(cvs, t);
+    row.appendChild(cvs);
+    const label = document.createElement('span');
+    label.textContent = `${t.tileId}: ${t.name || ''}`;
+    row.appendChild(label);
+    row.addEventListener('click', () => {
+      spBrushTileId = t.tileId;
+      updateSpBrushInfo();
+      renderSpBrushList(document.getElementById('spBrushSearch').value || '');
+    });
+    list.appendChild(row);
+  }
+}
+
+// ========== QUICK CREATE TILE ==========
+// Lightweight tile registration used by the SetPiece editor. Pre-fills a
+// new tile at the clicked sheet cell; the user picks flags and a name and
+// the new tile is appended to tiles[] (auto-incremented tileId), then
+// immediately set as the SetPiece brush.
+let _quickTilePending = null;
+
+function openQuickCreateTile(spriteKey, row, col, otherUses) {
+  _quickTilePending = { spriteKey, row, col };
+  const overlay = document.getElementById('quickTileOverlay');
+  const nextId = tiles.reduce((m, t) => Math.max(m, t.tileId), -1) + 1;
+  document.getElementById('quickTileName').value = 'New_Tile_' + nextId;
+  document.getElementById('quickTileSize').value = 32;
+  document.getElementById('quickTileCollision').checked = false;
+  document.getElementById('quickTileWall').checked = false;
+  document.getElementById('quickTileSlows').checked = false;
+  document.getElementById('quickTileDamaging').checked = false;
+  document.getElementById('quickTileInteraction').value = '';
+  let info = `Sheet: ${spriteKey} | Row ${row} Col ${col} | Next ID: ${nextId}`;
+  if (otherUses && otherUses.length > 0) {
+    const summary = otherUses.slice(0, 4)
+        .map(u => `${u.kind} "${u.name}"`)
+        .join(', ');
+    info += `<br><span style="color:#fa5">Note: this sprite is also used by ${summary}${otherUses.length > 4 ? '…' : ''}</span>`;
+  }
+  document.getElementById('quickTilePreviewInfo').innerHTML = info;
+  // Render preview using the same sprite-sampling rules drawTilePreview uses.
+  const previewCanvas = document.getElementById('quickTilePreviewCanvas');
+  const ctx = previewCanvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+  const img = images[spriteKey];
+  if (img) {
+    // The detail-grid stores its sprite size in `gridSize` for the active
+    // sheet. Source rect = (col*gridSize, row*gridH, gridSize, gridH).
+    const gh = getGridH();
+    ctx.drawImage(img, col * gridSize, row * gh, gridSize, gh,
+        0, 0, previewCanvas.width, previewCanvas.height);
+  }
+  overlay.style.display = 'flex';
+  document.getElementById('quickTileName').focus();
+}
+
+function closeQuickCreateTile() {
+  _quickTilePending = null;
+  document.getElementById('quickTileOverlay').style.display = 'none';
+}
+
+function confirmQuickCreateTile() {
+  if (!_quickTilePending) return;
+  const { spriteKey, row, col } = _quickTilePending;
+  const nextId = tiles.reduce((m, t) => Math.max(m, t.tileId), -1) + 1;
+  const size = parseInt(document.getElementById('quickTileSize').value) || 32;
+  const interactionType = document.getElementById('quickTileInteraction').value.trim();
+  const newTile = {
+    tileId: nextId,
+    name: document.getElementById('quickTileName').value || ('Tile_' + nextId),
+    spriteKey,
+    row,
+    col,
+    size,
+    data: {
+      hasCollision: document.getElementById('quickTileCollision').checked ? 1 : 0,
+      slows: document.getElementById('quickTileSlows').checked ? 1 : 0,
+      damaging: document.getElementById('quickTileDamaging').checked ? 1 : 0,
+      isWall: document.getElementById('quickTileWall').checked ? 1 : 0,
+    }
+  };
+  if (interactionType) newTile.interactionType = interactionType;
+  tiles.push(newTile);
+  tiles.sort((a, b) => a.tileId - b.tileId);
+  markDirty('tiles');
+  // Refresh the tile-list panel + sheet overlay so the new registration
+  // shows up immediately (highlighted cell on the sheet, count bumped).
+  if (typeof renderTileList === 'function') renderTileList(document.getElementById('tileSearch').value || '');
+  if (typeof drawOverlay === 'function') drawOverlay();
+  const tileCountEl = document.getElementById('tileCount');
+  if (tileCountEl) tileCountEl.textContent = tiles.length;
+  // Use the freshly-created tile as the SetPiece brush.
+  spBrushTileId = newTile.tileId;
+  updateSpBrushInfo();
+  // Refresh inline brush list so the new tile shows up at the bottom.
+  const search = document.getElementById('spBrushSearch');
+  renderSpBrushList(search ? search.value : '');
+  closeQuickCreateTile();
 }
 
 // ========== REALM EVENTS ==========
@@ -4315,18 +4637,36 @@ function bindEvents() {
     const rect = sheetCanvas.getBoundingClientRect();
     const col = Math.floor((e.clientX - rect.left) / (gridSize * SCALE));
     const row = Math.floor((e.clientY - rect.top) / (getGridH() * SCALE));
+    if (activeTab === 'setpieces' && selectedSetPiece) {
+      const existing = findTileByCell(currentSheet, row, col);
+      hoverInfo.textContent = existing
+        ? `Brush: ${existing.name} (id ${existing.tileId}) — click to use`
+        : `Row ${row} Col ${col} — click to QUICK CREATE tile`;
+      scrollEl.style.cursor = 'crosshair';
+      return;
+    }
     hoverInfo.textContent = pickMode
       ? `Click to pick: Row ${row}, Col ${col}`
       : `Row: ${row}  Col: ${col}  (px: ${col * gridSize}, ${row * getGridH()})`;
     scrollEl.style.cursor = pickMode ? 'crosshair' : '';
   });
 
-  // Sheet click - pick sprite (works for both tiles and items)
+  // Sheet click - pick sprite (works for both tiles and items).
+  // SetPieces tab is special: clicks always set the brush — no pickMode
+  // toggle needed. If the (sheet,row,col) cell maps to a registered tile,
+  // it becomes the brush directly. If not, the quick-create dialog opens
+  // so the user can register a fresh tile (with flag checkboxes) without
+  // leaving the setpiece editor.
   scrollEl.addEventListener('click', (e) => {
-    if (!pickMode) return;
     const rect = sheetCanvas.getBoundingClientRect();
     const col = Math.floor((e.clientX - rect.left) / (gridSize * SCALE));
     const row = Math.floor((e.clientY - rect.top) / (getGridH() * SCALE));
+
+    if (activeTab === 'setpieces' && selectedSetPiece) {
+      handleSheetClickForSetPiece(currentSheet, row, col);
+      return;
+    }
+    if (!pickMode) return;
 
     if (activeTab === 'tiles' && selectedTile) {
       document.getElementById('detailRow').value = row;
@@ -4491,14 +4831,16 @@ function bindEvents() {
   document.getElementById('mapStampSpBtn').addEventListener('click', startStampSetPiece);
 
   // SetPiece editor
-  document.getElementById('spPickTileBtn').addEventListener('click', () => {
-    openTilePicker((tileId) => {
-      spBrushTileId = tileId;
-      updateSpBrushInfo();
-    });
-  });
+  // Brush is now picked via the main sprite-sheet panel OR via the inline
+  // searchable list under the canvas — no modal overlay needed.
   document.getElementById('spLayerSelect').addEventListener('change', renderSpCanvas);
+  document.getElementById('spShowGrid').addEventListener('change', drawSpOverlay);
+  document.getElementById('spBrushSearch').addEventListener('input', (e) => renderSpBrushList(e.target.value));
   initSpCanvasEvents();
+  // Quick-create-tile dialog buttons
+  document.getElementById('quickTileCloseBtn').addEventListener('click', closeQuickCreateTile);
+  document.getElementById('quickTileCancelBtn').addEventListener('click', closeQuickCreateTile);
+  document.getElementById('quickTileCreateBtn').addEventListener('click', confirmQuickCreateTile);
   document.getElementById('applyMapBtn').addEventListener('click', () => { markDirty('maps'); });
   document.getElementById('mapPlaceEnemyBtn').addEventListener('click', startPlaceEnemy);
   document.getElementById('mapCancelPlaceBtn').addEventListener('click', cancelPlaceEnemy);

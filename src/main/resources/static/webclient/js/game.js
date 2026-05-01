@@ -1171,18 +1171,26 @@ export class GameState {
             }
 
             if (Math.abs(p.dx) > 0.1) p.facing = p.dx > 0 ? 'right' : 'left';
-            p.animTimer = (p.animTimer || 0) + dt;
-            // Frame interval scales with current movement speed so a fast
-            // peer's walk cycle visibly outpaces a slow one's. Was a fixed
-            // 125 ms per frame; now 60 ms (sprinting) → 200 ms (slow walk
-            // / standing). Idle entities (dx≈dy≈0) stay on the first frame
-            // via the upstream attack/idle anim selection, so this only
-            // affects walking players.
-            const pace = Math.max(0.1, Math.sqrt(p.dx * p.dx + p.dy * p.dy));
-            const frameThreshold = Math.max(0.06, Math.min(0.2, 0.18 / pace));
-            if (p.animTimer > frameThreshold) {
-                p.animTimer = 0;
-                p.animFrame = ((p.animFrame || 0) + 1) % 2;
+            // Walk cycle is driven by pixels traveled, NOT elapsed time.
+            // Each tile is 32px (server BASE_TILE_SIZE), so we swap legs
+            // every PX_PER_FRAME pixels of motion. At 24px (3/4 of a tile)
+            // a full 2-frame cycle covers 1.5 tiles per stride — looks
+            // like a natural gait at every speed (slow Knight ~4 tiles/s,
+            // max-spd Ninja ~9.6 tiles/s) instead of being faster than the
+            // character's actual locomotion.
+            // p.dx / p.dy are px-per-tick (64Hz), so per-second px = dx*64.
+            const PX_PER_FRAME = 24;
+            const pace = Math.sqrt(p.dx * p.dx + p.dy * p.dy);
+            if (pace > 0.1) {
+                p.animDistance = (p.animDistance || 0) + pace * 64 * dt;
+                if (p.animDistance > PX_PER_FRAME) {
+                    p.animDistance -= PX_PER_FRAME;
+                    p.animFrame = ((p.animFrame || 0) + 1) % 2;
+                }
+            } else {
+                // Reset accumulator when stationary so the first step after
+                // standing still doesn't fire instantly from leftover travel.
+                p.animDistance = 0;
             }
         }
 
