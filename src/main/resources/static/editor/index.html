@@ -224,6 +224,11 @@
             </label>
             <span id="mapBrushInfo" class="map-brush-info">Brush: (none)</span>
             <button id="mapPickTileBtn" class="btn-add">Select Brush Tile</button>
+            <label style="display:flex;align-items:center;gap:4px">
+              Size <input type="range" id="mapBrushSize" min="1" max="10" value="1" style="width:80px">
+              <span id="mapBrushSizeLabel" style="display:inline-block;min-width:14px;text-align:right">1</span>
+            </label>
+            <button id="mapFillLayerBtn" class="btn-add" style="background:#553" title="Fill the current layer with the brush tile">Fill Layer</button>
             <button id="mapStampSpBtn" class="btn-add" style="background:#446">Stamp SetPiece</button>
             <label><input type="checkbox" id="mapShowGrid" checked> Grid</label>
           </div>
@@ -699,7 +704,10 @@
       </div>
       <div class="tile-list" id="spListView"></div>
       <div id="spDetail" style="display:none">
-        <h3>SetPiece Detail</h3>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <button id="spBackBtn" class="btn-pick" style="padding:2px 10px">&larr; Back to list</button>
+          <h3 style="margin:0">SetPiece Detail</h3>
+        </div>
         <div class="detail-grid">
           <label>ID: <input type="number" id="spId" readonly></label>
           <label>Name: <input type="text" id="spName"></label>
@@ -714,6 +722,11 @@
             </select>
           </label>
           <span id="spBrushInfo" class="map-brush-info">Brush: (none)</span>
+          <label style="display:flex;align-items:center;gap:4px">
+            Size <input type="range" id="spBrushSize" min="1" max="10" value="1" style="width:80px">
+            <span id="spBrushSizeLabel" style="display:inline-block;min-width:14px;text-align:right">1</span>
+          </label>
+          <button id="spFillLayerBtn" class="btn-add" style="background:#553" title="Fill the current layer with the brush tile">Fill Layer</button>
           <label><input type="checkbox" id="spShowGrid" checked> Grid</label>
         </div>
         <div style="font-size:11px;color:#888;margin:2px 0 6px 0">

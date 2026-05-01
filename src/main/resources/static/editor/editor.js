@@ -129,6 +129,10 @@ let dirtySetPieces = false;
 let spBrushTileId = -1;
 let spPainting = false;
 let spLayer = '0';
+// Brush radius (1 = single tile, up to 10 = 10-tile-radius circular brush).
+// Shared shape used by both the static map editor and the setpiece editor.
+let mapBrushRadius = 1;
+let spBrushRadius = 1;
 let realmEvents = [];
 let selectedRealmEvent = null;
 let dirtyRealmEvents = false;
@@ -2596,6 +2600,23 @@ function drawEnemySpawnsOnOverlay() {
 
 let stampingSetPiece = null; // SetPiece model being stamped, or null
 
+function fillMapLayer() {
+  if (!selectedMap || !selectedMap.data || mapBrushTileId < 0) {
+    alert('Select a map and pick a brush tile first.');
+    return;
+  }
+  const layer = getMapLayer();
+  if (!selectedMap.data[layer]) return;
+  if (!confirm(`Fill ENTIRE layer ${layer} with brush tile? This overwrites every cell.`)) return;
+  for (let r = 0; r < selectedMap.height; r++) {
+    for (let c = 0; c < selectedMap.width; c++) {
+      selectedMap.data[layer][r][c] = mapBrushTileId;
+    }
+  }
+  markDirty('maps');
+  renderMapCanvas();
+}
+
 function startStampSetPiece() {
   if (!selectedMap || !selectedMap.data) { alert('Select a static map first'); return; }
   // Show a simple prompt to pick a setPieceId
@@ -2663,15 +2684,36 @@ function mapCanvasDrag(e) {
 
 function paintMapCell(row, col) {
   if (!selectedMap || !selectedMap.data || mapBrushTileId < 0) return;
+  forEachBrushCell(row, col, mapBrushRadius, (r, c) => {
+    paintMapCellSingle(r, c, mapBrushTileId);
+  });
+}
+
+function paintMapCellSingle(row, col, tileId) {
   const m = selectedMap;
+  if (!m || !m.data) return;
   const layer = getMapLayer();
   if (row < 0 || row >= m.height || col < 0 || col >= m.width) return;
   if (!m.data[layer]) return;
-  if (m.data[layer][row][col] === mapBrushTileId) return;
-  m.data[layer][row][col] = mapBrushTileId;
+  if (m.data[layer][row][col] === tileId) return;
+  m.data[layer][row][col] = tileId;
   markDirty('maps');
-  // Redraw just the affected cell
   redrawMapCell(row, col);
+}
+
+// Iterate every (r, c) inside a circular brush of the given radius around
+// (centerR, centerC), inclusive of the center. radius=1 hits just the
+// center cell. Larger radii expand outward in a disc — Euclidean check
+// keeps the footprint round (not square) so the visual matches what
+// users expect from a "circular" brush.
+function forEachBrushCell(centerR, centerC, radius, fn) {
+  const r2 = (radius - 1) * (radius - 1);
+  for (let dr = -(radius - 1); dr <= radius - 1; dr++) {
+    for (let dc = -(radius - 1); dc <= radius - 1; dc++) {
+      if (dr * dr + dc * dc > r2) continue;
+      fn(centerR + dr, centerC + dc);
+    }
+  }
 }
 
 function redrawMapCell(row, col) {
@@ -4091,19 +4133,29 @@ function updateSpBrushInfo() {
 
 function paintSpCell(row, col) {
   if (!selectedSetPiece || spBrushTileId < 0) return;
+  forEachBrushCell(row, col, spBrushRadius, (r, c) => paintSpCellSingle(r, c, spBrushTileId));
+}
+
+function paintSpCellSingle(row, col, tileId) {
   const sp = selectedSetPiece;
+  if (!sp) return;
   if (row < 0 || row >= sp.height || col < 0 || col >= sp.width) return;
   const layer = getSpLayer();
   if (!sp.data[layer] || !sp.data[layer][row]) return;
-  if (sp.data[layer][row][col] === spBrushTileId) return;
-  sp.data[layer][row][col] = spBrushTileId;
+  if (sp.data[layer][row][col] === tileId) return;
+  sp.data[layer][row][col] = tileId;
   markDirty('setpieces');
   redrawSpCell(row, col);
 }
 
 function eraseSpCell(row, col) {
   if (!selectedSetPiece) return;
+  forEachBrushCell(row, col, spBrushRadius, (r, c) => eraseSpCellSingle(r, c));
+}
+
+function eraseSpCellSingle(row, col) {
   const sp = selectedSetPiece;
+  if (!sp) return;
   if (row < 0 || row >= sp.height || col < 0 || col >= sp.width) return;
   const layer = getSpLayer();
   if (!sp.data[layer] || !sp.data[layer][row]) return;
@@ -4111,6 +4163,32 @@ function eraseSpCell(row, col) {
   sp.data[layer][row][col] = 0;
   markDirty('setpieces');
   redrawSpCell(row, col);
+}
+
+function fillSpLayer() {
+  if (!selectedSetPiece || spBrushTileId < 0) {
+    alert('Select a setpiece and pick a brush tile first.');
+    return;
+  }
+  const sp = selectedSetPiece;
+  const layer = getSpLayer();
+  if (!sp.data[layer]) return;
+  if (!confirm(`Fill ENTIRE layer ${layer} with brush tile? This overwrites every cell.`)) return;
+  for (let r = 0; r < sp.height; r++) {
+    for (let c = 0; c < sp.width; c++) {
+      sp.data[layer][r][c] = spBrushTileId;
+    }
+  }
+  markDirty('setpieces');
+  renderSpCanvas();
+}
+
+// Return to the setpiece list (clears selection + hides detail panel).
+function deselectSetPiece() {
+  selectedSetPiece = null;
+  const detail = document.getElementById('spDetail');
+  if (detail) detail.style.display = 'none';
+  renderSetPieceList();
 }
 
 function redrawSpCell(row, col) {
@@ -4836,6 +4914,22 @@ function bindEvents() {
   document.getElementById('spLayerSelect').addEventListener('change', renderSpCanvas);
   document.getElementById('spShowGrid').addEventListener('change', drawSpOverlay);
   document.getElementById('spBrushSearch').addEventListener('input', (e) => renderSpBrushList(e.target.value));
+  document.getElementById('spBackBtn').addEventListener('click', deselectSetPiece);
+  document.getElementById('spFillLayerBtn').addEventListener('click', fillSpLayer);
+  const spBrushSizeEl = document.getElementById('spBrushSize');
+  const spBrushSizeLabel = document.getElementById('spBrushSizeLabel');
+  spBrushSizeEl.addEventListener('input', () => {
+    spBrushRadius = parseInt(spBrushSizeEl.value) || 1;
+    spBrushSizeLabel.textContent = String(spBrushRadius);
+  });
+  // Map brush size + fill controls
+  document.getElementById('mapFillLayerBtn').addEventListener('click', fillMapLayer);
+  const mapBrushSizeEl = document.getElementById('mapBrushSize');
+  const mapBrushSizeLabel = document.getElementById('mapBrushSizeLabel');
+  mapBrushSizeEl.addEventListener('input', () => {
+    mapBrushRadius = parseInt(mapBrushSizeEl.value) || 1;
+    mapBrushSizeLabel.textContent = String(mapBrushRadius);
+  });
   initSpCanvasEvents();
   // Quick-create-tile dialog buttons
   document.getElementById('quickTileCloseBtn').addEventListener('click', closeQuickCreateTile);
@@ -4868,7 +4962,7 @@ function bindEvents() {
   document.addEventListener('mouseup', () => { mapPainting = false; });
   mapOverlay.addEventListener('mouseleave', () => { mapPainting = false; });
 
-  // Right-click to erase (set to 0)
+  // Right-click to erase (set to 0). Honors the same brush radius as paint.
   mapOverlay.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (!selectedMap || !selectedMap.data) return;
@@ -4878,11 +4972,13 @@ function bindEvents() {
     const col = Math.floor((e.clientX - rect.left) * scaleX / MAP_TILE_PX);
     const row = Math.floor((e.clientY - rect.top) * scaleY / MAP_TILE_PX);
     const layer = getMapLayer();
-    if (row >= 0 && row < selectedMap.height && col >= 0 && col < selectedMap.width) {
-      selectedMap.data[layer][row][col] = 0;
+    forEachBrushCell(row, col, mapBrushRadius, (r, c) => {
+      if (r < 0 || r >= selectedMap.height || c < 0 || c >= selectedMap.width) return;
+      if (selectedMap.data[layer][r][c] === 0) return;
+      selectedMap.data[layer][r][c] = 0;
       markDirty('maps');
-      redrawMapCell(row, col);
-    }
+      redrawMapCell(r, c);
+    });
   });
 
   // Enemies
