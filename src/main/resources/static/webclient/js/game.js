@@ -1194,19 +1194,51 @@ export class GameState {
         // known velocity, otherwise enemies stutter between sparse
         // server updates.
         //
-        // EXTRAPOLATION CAP: server's MAX_STALE_TICKS is 48 (~750ms), so
-        // any entity in the player's viewport gets a velocity refresh
-        // within that window. If we haven't seen one in 1200ms, the entity
-        // has dropped out of viewport and the server has stopped pushing
-        // updates — keep extrapolating and the enemy drifts off the map
-        // into the abyss. Zero the velocity once we cross that threshold
-        // so the enemy parks at its last known position instead of
-        // sliding into the void.
+        // VIEWPORT GATE: the server only sends ObjectMovePackets for
+        // entities within ~10 tiles of any player. The instant an enemy
+        // crosses outside the local player's viewport, server updates
+        // dry up and any further extrapolation is pure client fiction —
+        // the player would see the enemy drift off-screen for up to
+        // 1.2s before the staleness cap kicked in. Freeze velocity the
+        // moment the enemy leaves the visible area.
+        //
+        // STALENESS CAP (1200ms): backstop for the rare case where the
+        // server stops sending updates while the enemy is still inside
+        // viewport (e.g. realm transition, packet loss). Snap back to
+        // last server position so the entity doesn't drift into the void.
         const EXTRAP_CAP_MS = 1200;
+        // Match server's viewport radius (10 tiles * 32px). Add a small
+        // margin so an enemy hugging the edge doesn't snap-stop on every
+        // jitter — only freeze once it's clearly outside.
+        const VIEWPORT_PX = 10 * 32;
+        const VIEWPORT_FREEZE_PX = VIEWPORT_PX + 16; // 1/2 tile margin
+        const localPlayer = this.getLocalPlayer();
         const nowMs = performance.now();
         for (const [id, e] of this.enemies) {
             if (e.dx !== 0 || e.dy !== 0) {
-                if (e._lastVelUpdate != null && (nowMs - e._lastVelUpdate) > EXTRAP_CAP_MS) {
+                let outsideViewport = false;
+                if (localPlayer) {
+                    const ex = e.pos.x + (e.size || 32) * 0.5;
+                    const ey = e.pos.y + (e.size || 32) * 0.5;
+                    const px = localPlayer.pos.x + (localPlayer.size || 32) * 0.5;
+                    const py = localPlayer.pos.y + (localPlayer.size || 32) * 0.5;
+                    const ddx = ex - px, ddy = ey - py;
+                    if (ddx * ddx + ddy * ddy > VIEWPORT_FREEZE_PX * VIEWPORT_FREEZE_PX) {
+                        outsideViewport = true;
+                    }
+                }
+                if (outsideViewport) {
+                    // Server has stopped updating this enemy because it
+                    // left the viewport. Stop pretending we know where
+                    // it's going — park it at its last reported position.
+                    e.dx = 0; e.dy = 0;
+                    if (e._serverPosX != null) {
+                        e.pos.x = e._serverPosX;
+                        e.pos.y = e._serverPosY;
+                        e.targetX = e._serverPosX;
+                        e.targetY = e._serverPosY;
+                    }
+                } else if (e._lastVelUpdate != null && (nowMs - e._lastVelUpdate) > EXTRAP_CAP_MS) {
                     // Cap fired — snap back to the last server-known position
                     // so an enemy that drifted off-map during the silent
                     // window doesn't get permanently stranded in the void.
