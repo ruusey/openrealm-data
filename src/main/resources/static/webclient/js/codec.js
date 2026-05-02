@@ -262,7 +262,8 @@ export const NetLootContainer = {
         return {
             lootContainerId: r.readLong(), uid: r.readString(), isChest: r.readBoolean(),
             tier: r.readByte(), items: r.readArray(rr => NetGameItem.read(rr)),
-            pos: Vector2f.read(r), spawnedTime: r.readLong(), contentsChanged: r.readBoolean()
+            pos: Vector2f.read(r), spawnedTime: r.readLong(), contentsChanged: r.readBoolean(),
+            soulboundPlayerId: r.readLong()
         };
     }
 };

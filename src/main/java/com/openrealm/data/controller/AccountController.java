@@ -67,6 +67,13 @@ public class AccountController {
             if (!this.authFilter.accountGuidMatch(account.getAccountGuid(), req)) {
                 throw new Exception("Invalid token");
             }
+            // Prevent privilege escalation: only admins can modify account provisions
+            final AccountDto callerAccount = this.authFilter.getAuthedUser(req);
+            if (account.getAccountProvisions() != null && !account.getAccountProvisions().isEmpty()) {
+                if (callerAccount == null || !callerAccount.isAdmin()) {
+                    throw new Exception("Insufficient permissions to modify account provisions");
+                }
+            }
             final AccountEntity updatedAccount = this.openRealmAccounts.updateAccountAndAuth(account);
             res = ApiUtils.buildSuccess(updatedAccount);
         } catch (final Exception e) {
